@@ -1,0 +1,143 @@
+/* ============================================================
+   PhysMaster DSE — engine (no DOM rendering here)
+   Store | PhysicsQA | AnswerChecker | QuestionGenerator
+   ============================================================ */
+(function(global){
+  'use strict';
+
+  /* ---------------- Store (localStorage) ---------------- */
+  const KEY = 'physmaster_dse_v1';
+  const defaultState = {
+    topicStats:{},      // topicId -> {correct,total}
+    attempts:[],        // {id,topic,correct,ts}
+    knownCards:[],      // flashcard ids marked known
+    chat:[],
+    checkerHistory:[]
+  };
+  const Store = {
+    _state:null,
+    load(){
+      try{
+        const raw = (typeof localStorage!=='undefined') ? localStorage.getItem(KEY) : null;
+        this._state = raw ? Object.assign({}, defaultState, JSON.parse(raw)) : JSON.parse(JSON.stringify(defaultState));
+      }catch(e){ this._state = JSON.parse(JSON.stringify(defaultState)); }
+      return this._state;
+    },
+    save(){
+      try{ if(typeof localStorage!=='undefined') localStorage.setItem(KEY, JSON.stringify(this._state)); }catch(e){}
+    },
+    state(){ return this._state || this.load(); },
+    recordQuestion(topic, correct, id){
+      const s=this.state();
+      if(!s.topicStats[topic]) s.topicStats[topic]={correct:0,total:0};
+      s.topicStats[topic].total++;
+      if(correct) s.topicStats[topic].correct++;
+      s.attempts.push({id:id||null,topic,correct:!!correct,ts:Date.now()});
+      this.save();
+    },
+    topicMastery(){
+      const s=this.state(), out={};
+      TOPICS.forEach(t=>{
+        const st=s.topicStats[t.id]||{correct:0,total:0};
+        out[t.id]={name:t.name,icon:t.icon,correct:st.correct,total:st.total,
+          pct: st.total? Math.round(100*st.correct/st.total):null};
+      });
+      return out;
+    },
+    weakTopics(){
+      return Object.values(this.topicMastery())
+        .filter(x=>x.total>0)
+        .sort((a,b)=>(a.pct??101)-(b.pct??101));
+    },
+    reset(){ this._state=JSON.parse(JSON.stringify(defaultState)); this.save(); },
+    toggleCard(id){
+      const s=this.state(), i=s.knownCards.indexOf(id);
+      if(i>=0) s.knownCards.splice(i,1); else s.knownCards.push(id);
+      this.save(); return i<0;
+    }
+  };
+
+  /* ---------------- Physics Q&A (rule-based tutor) ---------------- */
+  const QA_RULES = [
+    {keys:['centripetal','circular motion','circle'], a:'Centripetal force keeps an object in uniform circular motion and ALWAYS points to the centre: F = mv²/r = mω²r. It is not a new/extra force — tension, friction, gravity or the normal reaction supplies it. Speed (and KE) stays constant, but velocity & acceleration vectors keep changing direction.'},
+    {keys:['fleming','left hand','right hand','motor effect','hand rule'], a:'Motor effect (force on a supplied current) → Fleming’s LEFT-hand rule. Generator/induction (motion induces a current) → RIGHT-hand rule. Fingers: First=Field, seCond=Current, Thumb=motion/force, all at right angles.'},
+    {keys:['series','parallel','circuit'], a:'Series: same current everywhere, voltages add, R=R₁+R₂+…. Parallel: same voltage across each branch, currents add, 1/R=1/R₁+1/R₂+…. Adding a resistor in parallel LOWERS total resistance.'},
+    {keys:['latent','melt','boil','phase','change of state','mct','mcδt','q=ml'], a:'Use Q=mcΔT only while temperature changes. During melting/boiling/freezing T is constant, so use Q=ml (specific latent heat). For a full heating curve split it into warming steps and plateau steps and add them.'},
+    {keys:['decay','half-life','half life','alpha','beta','gamma','radioactiv'], a:'Half-life: N=N₀(½)^n with n=t/t½; it is unaffected by temperature/pressure/chemistry. In decay equations balance BOTH mass number A and charge Z. α: A−4,Z−2; β⁻: A same,Z+1; γ: no change. Penetration α<β<γ; ionisation α>β>γ.'},
+    {keys:['projectile','projectile motion'], a:'Split into horizontal and vertical. Horizontal: no acceleration ⇒ constant horizontal velocity. Vertical: acceleration g downward, use the kinematic equations. At the peak vertical velocity = 0 but acceleration is still g. Time of flight is set by the vertical motion.'},
+    {keys:['momentum','collision','impulse'], a:'Momentum p=mv is conserved for a system with no external force. Impulse FΔt=Δp=area under an F–t graph. Elastic: KE conserved; inelastic: KE lost; perfectly inelastic: bodies stick and move together.'},
+    {keys:['refract','refraction','critical angle','total internal','snell'], a:'n=sin i/sin r=c/v. Entering a denser medium light slows, wavelength shortens, bends TOWARD the normal; frequency (colour) is unchanged. Critical angle sin C=1/n; beyond it (dense→less dense) total internal reflection occurs.'},
+    {keys:['transformer','transmission','step-up','step-down'], a:'Vp/Vs=Np/Ns; for an ideal transformer power is conserved VpIp=VsIs. Transformers need a.c. (changing flux). Mains is sent at HIGH voltage to lower current and reduce I²R heat loss in cables.'},
+    {keys:['power','electrical power','watt'], a:'Electrical power: P=VI=I²R=V²/R (pick the form matching known quantities). Energy E=Pt=VIt; convert minutes to seconds.'},
+    {keys:['gas','boyle','kelvin','charles'], a:'Gas laws need absolute temperature in KELVIN (K=°C+273). Fixed mass: p₁V₁/T₁=p₂V₂/T₂. Constant T: pV=const; constant V: p/T=const; constant p: V/T=const.'},
+    {keys:['energy','kinetic','potential','conservation of energy','work'], a:'Work W=Fs cosθ; KE=½mv²; gravitational PE=mgh; power P=W/t=Fv. With no friction, total mechanical energy is conserved; the work done by the net force = change in KE.'},
+    {keys:['wave','wavelength','frequency','sound','echo'], a:'v=fλ, f=1/T. Sound is longitudinal and needs a medium (none in vacuum). Pitch↔frequency, loudness↔amplitude, intensity∝amplitude². For an echo remember the sound travels there AND back: d=vt/2.'},
+    {keys:['fuse','live','neutral','earth','domestic','safety'], a:'Fuse and switch go on the LIVE wire so an appliance is isolated when off/blown. Earth wire + fuse protect against a live-to-case fault. Choose a fuse rating just above normal operating current.'},
+    {keys:['efficiency','sankey','renewable'], a:'Efficiency η=useful output/total input (×100%). A Sankey diagram shows useful vs wasted (often heat) energy. Renewable sources replenish naturally; fossil/nuclear are non-renewable.'},
+    {keys:['ct','x-ray','ultrasound','medical','rni','radionuclide','imaging'], a:'Ultrasound images use echoes at tissue boundaries (Z=ρc). X-rays attenuate as I=I₀e^(−μx); CT gives structural 3-D images. RNI uses an ingested radioisotope and shows FUNCTION/tracer uptake, not just structure.'},
+    {keys:['newton','force','inertia','f=ma'], a:'Newton 1: no net force ⇒ constant velocity. Newton 2: F=ma=Δp/Δt. Newton 3: action/reaction are equal, opposite and act on DIFFERENT bodies. Always draw a free-body diagram of the chosen body.'},
+    {keys:['escape','kepler','orbit','astronom','gravity','gravitation'], a:'Kepler: T²∝r³; orbital speed v=√(GM/r); escape speed v=√(2GM/r); gravitational field g=GM/r². Doubling launch speed quadruples the kinetic energy.'}
+  ];
+  const PhysicsQA = {
+    ask(q){
+      const s=q.toLowerCase().trim();
+      if(!s) return 'Ask me any HKDSE physics concept, e.g. “explain centripetal force”.';
+      let best=null,bestScore=0;
+      for(const rule of QA_RULES){
+        let score=0;
+        rule.keys.forEach(k=>{ if(s.includes(k)) score += k.length; });
+        if(score>bestScore){bestScore=score;best=rule;}
+      }
+      if(best) return best.a;
+      return 'I can help with HKDSE Physics topics: mechanics, heat & gases, waves/light/sound, electricity, electromagnetism, radioactivity, astronomy/energy/medical imaging. Try naming the concept (e.g. “half-life”, “parallel circuits”, “projectile motion”), or tell me the exact question and I’ll work through it step by step.';
+    }
+  };
+
+  /* ---------------- Answer checker ---------------- */
+  const AnswerChecker = {
+    // numeric check
+    numeric(user, accepted, tolPct){
+      const u=parseFloat(String(user).replace(/[^0-9.\-eE]/g,''));
+      const a=parseFloat(String(accepted).replace(/[^0-9.\-eE]/g,''));
+      if(isNaN(u)) return {ok:false,verdict:'wrong',msg:'I couldn’t read a number from your answer — enter a numeric value.'};
+      const tol=Math.abs(a)*(tolPct/100);
+      const diff=Math.abs(u-a);
+      if(diff<=Math.max(tol,1e-9)){
+        return {ok:true,verdict:'correct',msg:`Correct — your value ${u} matches ${a} within ${tolPct}% tolerance.`,pctErr:a?Math.abs((u-a)/a*100):0};
+      }
+      return {ok:false,verdict: diff<=Math.abs(a)*((tolPct*2)/100)?'partial':'wrong',
+        msg:`Off by ${diff.toPrecision(3)}. Your ${u} vs accepted ${a} (${Math.abs((u-a)/a*100).toFixed(1)}% difference). Check your formula, unit conversion and significant figures.`,
+        pctErr:a?Math.abs((u-a)/a*100):0};
+    },
+    // written / keyword check
+    written(userText, keyPoints){
+      const u=userText.toLowerCase();
+      const kps=keyPoints.split(',').map(s=>s.trim()).filter(Boolean);
+      const hits=[],miss=[];
+      kps.forEach(kp=>{ if(u.includes(kp.toLowerCase())) hits.push(kp); else miss.push(kp); });
+      const ratio=kps.length? hits.length/kps.length:0;
+      const verdict= ratio>=0.8?'correct': ratio>=0.4?'partial':'wrong';
+      return {ok:verdict!=='wrong',verdict,hits,miss,
+        msg:verdict==='correct'?'All key points covered — full-mark answer.':
+            verdict==='partial'?'Partial: add the missing key point(s) to gain the remaining marks.':
+            'Missing most key points — restructure around the physical principle, formula and outcome.'};
+    }
+  };
+
+  /* ---------------- Question generator ---------------- */
+  function shuffle(arr){ const a=arr.slice(); for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a; }
+  const QuestionGenerator = {
+    pool(topic,level){
+      return QUESTIONS.filter(q=>(!topic||topic==='all'||q.topic===topic)&&(!level||level==='all'||q.level===level));
+    },
+    buildSet(topic,level,n){
+      return shuffle(this.pool(topic,level)).slice(0, n||10);
+    },
+    single(topic,level){
+      const p=this.pool(topic,level); return p.length?shuffle(p)[0]:null;
+    }
+  };
+
+  global.Store=Store; global.PhysicsQA=PhysicsQA; global.AnswerChecker=AnswerChecker;
+  global.QuestionGenerator=QuestionGenerator; global.shuffle=shuffle;
+})(typeof window!=='undefined'?window:globalThis);
