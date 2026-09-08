@@ -476,6 +476,7 @@
     setTimeout(()=>{
       const log=[]; const ok=(c,m)=>log.push((c?'PASS':'FAIL')+' · '+m);
       try{
+        Store.reset(); // deterministic: clear persisted progress before self-test
         const pages=['dashboard','checker','qa','notes','flashcards','papers','practice','analytics','tips'];
         pages.forEach(p=>{ App.render(p); ok(document.getElementById('main').innerHTML.length>200, 'render '+p); });
         // practice flow
