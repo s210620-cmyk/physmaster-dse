@@ -8,6 +8,25 @@
   Store.load();
   const $ = sel => document.querySelector(sel);
   const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  function formatAI(t){
+    const e=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    let html=e(t||'');
+    html=html.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
+    const lines=html.split(/\r?\n/);
+    let out='', listType=null;
+    const close=()=>{ if(listType){ out+=(listType==='ul'?'</ul>':'</ol>'); listType=null; } };
+    for(const line of lines){
+      const ul=line.match(/^\s*[-*]\s+(.*)/);
+      const ol=line.match(/^\s*\d+[.)]\s+(.*)/);
+      const hd=line.match(/^#{1,4}\s+(.*)/);
+      if(hd){ close(); out+='<h4>'+hd[1]+'</h4>'; continue; }
+      if(ul){ if(listType!=='ul'){close(); out+='<ul>'; listType='ul';} out+='<li>'+ul[1]+'</li>'; continue; }
+      if(ol){ if(listType!=='ol'){close(); out+='<ol>'; listType='ol';} out+='<li>'+ol[1]+'</li>'; continue; }
+      if(!line.trim()){ close(); continue; }
+      close(); out+='<p>'+line+'</p>';
+    }
+    close(); return out;
+  }
   let charts=[];
   function disposeCharts(){ charts.forEach(c=>{try{c.dispose();}catch(e){}}); charts=[]; }
 
@@ -80,11 +99,40 @@
       }).join('');
     },
 
-    /* ---------- Answer checker ---------- */
+    /* ---------- Answer checker (AI photo + quick offline) ---------- */
     page_checker(){
       const s=Store.state();
+      const tab=App.ai.tab;
       return `
-      <div class="page-head"><h1>✅ Answer Checker</h1><p>Enter your worked answer and compare it — numeric problems or written key-point answers.</p></div>
+      <div class="page-head"><h1>✅ Answer Checker</h1><p>AI photo marking for handwritten work, graphs and diagrams — plus a quick offline numeric/keyword checker.</p></div>
+      <div class="tabs">
+        <button class="tab ${tab==='ai'?'active':''}" data-act="switchCheckerTab" data-arg="ai">🤖 AI photo checker</button>
+        <button class="tab ${tab==='quick'?'active':''}" data-act="switchCheckerTab" data-arg="quick">⚡ Quick checker (offline)</button>
+      </div>
+      ${tab==='ai'? this._aiCheckerHtml() : this._quickCheckerHtml()}
+      <div class="section-title">🧾 Recent checks</div>
+      <div class="card">${s.checkerHistory.length? s.checkerHistory.slice().reverse().slice(0,8).map(h=>
+        `<div class="check-line"><span class="badge ${h.verdict==='correct'?'easy':h.verdict==='partial'?'medium':h.verdict==='ai'?'':'hard'}">${h.verdict}</span><span>${esc(h.text)}</span></div>`).join('') : '<p class="muted small">No checks yet.</p>'}</div>`;
+    },
+    after_checker(){
+      const fi=document.getElementById('aiFiles');
+      if(fi){
+        fi.addEventListener('change',async e=>{
+          const files=Array.from(e.target.files||[]);
+          if(!files.length)return;
+          App.ai.error=null;
+          const room=Math.max(0,6-App.ai.images.length);
+          for(const f of files.slice(0,room)){
+            try{ const im=await AIChecker.fileToImage(f); App.ai.images.push(im); }
+            catch(err){ App.ai.error=(err&&err.msg)||'Could not read an image.'; }
+          }
+          e.target.value='';
+          App.render('checker');
+        });
+      }
+    },
+    _quickCheckerHtml(){
+      return `
       <div class="grid g2">
         <div class="card">
           <h3>🔢 Numeric answer</h3>
@@ -107,11 +155,99 @@
           <button class="btn btn-primary" data-act="checkWritten">Check key points</button>
           <div id="wcOut"></div>
         </div>
-      </div>
-      <div class="section-title">🧾 Recent checks</div>
-      <div class="card">${s.checkerHistory.length? s.checkerHistory.slice().reverse().slice(0,8).map(h=>
-        `<div class="check-line"><span class="badge ${h.verdict==='correct'?'easy':h.verdict==='partial'?'medium':'hard'}">${h.verdict}</span><span>${esc(h.text)}</span></div>`).join('') : '<p class="muted small">No checks yet.</p>'}</div>`;
+      </div>`;
     },
+    _aiCheckerHtml(){
+      const cfg=AIChecker.load();
+      const imgs=App.ai.images;
+      const noKey=!cfg.apiKey;
+      return `
+      ${noKey?'<div class="ai-banner warn">🤖 AI marking needs a free API key (stored only on this device). Tap ⚙️ <b>AI settings</b> to add one — Google Gemini gives a free key and works directly in the browser.</div>':''}
+      ${App.ai.error?`<div class="ai-banner err">${esc(App.ai.error)}</div>`:''}
+      ${App.ai.settingsMsg?`<div class="ai-banner ok">${esc(App.ai.settingsMsg)}</div>`:''}
+      <div class="grid g2">
+        <div class="card">
+          <h3>📝 What to mark</h3>
+          <div class="field"><label>Topic</label><select id="aiTopic">${TOPICS.map(t=>`<option value="${t.id}">${t.icon} ${esc(t.name)}</option>`).join('')}</select></div>
+          <div class="field"><label>Question (paste the full question)</label><textarea id="aiQuestion" rows="3" placeholder="e.g. A 2 kg block on a rough surface is pushed by 10 N; friction is 4 N. Find the acceleration."></textarea></div>
+          <div class="grid g2">
+            <div class="field"><label>Marks available</label><input id="aiMarks" type="number" min="1" value="5"></div>
+            <div class="field"><label>Your typed answer (optional)</label><input id="aiAnswer" placeholder="e.g. 3 m/s²"></div>
+          </div>
+          <div class="field"><label>Marking scheme / expected answer (optional, improves marking)</label><textarea id="aiExpected" rows="2" placeholder="Paste the model answer or marking points…"></textarea></div>
+        </div>
+        <div class="card">
+          <h3>📷 Your work / graph / diagram</h3>
+          <p class="small muted">Take a photo of handwritten working, a free-body diagram, a motion graph, a circuit or ray diagram. Up to 6 images. Photos are resized on your device before sending.</p>
+          <input type="file" id="aiFiles" accept="image/*" multiple style="display:none">
+          <button class="btn btn-secondary" data-act="aiPickFiles">📷 Add photo / diagram</button>
+          <span class="small muted" style="margin-left:8px">${imgs.length}/6 attached</span>
+          <div class="thumbs">${imgs.map((im,i)=>`<div class="thumb"><img src="${im.dataUrl}" alt="attached"><button class="rm" data-act="aiRemoveImage" data-arg="${i}" title="Remove">✕</button></div>`).join('')}</div>
+          <div class="flex mt" style="gap:10px;flex-wrap:wrap">
+            <button class="btn btn-primary" data-act="aiCheck" ${App.ai.loading?'disabled':''}>${App.ai.loading?'⏳ Marking with AI…':'✅ Check with AI'}</button>
+            <button class="btn btn-secondary" data-act="aiToggleSettings">⚙️ AI settings</button>
+            ${App.ai.result?'<button class="btn btn-secondary" data-act="aiClearResult">🗑 Clear result</button>':''}
+          </div>
+          <div id="aiSettings" style="${App.ai.showSettings?'':'display:none'};margin-top:14px">
+            <div class="card" style="box-shadow:none;border:1px solid var(--background)">
+              <h4>AI settings</h4>
+              <div class="grid g2">
+                <div class="field"><label>Provider</label><select id="aiProvider"><option value="gemini" ${cfg.provider==='gemini'?'selected':''}>Google Gemini (recommended)</option><option value="openai" ${cfg.provider==='openai'?'selected':''}>OpenAI-compatible (OpenRouter / local)</option></select></div>
+                <div class="field"><label>Model</label><input id="aiModel" value="${esc(cfg.model)}"></div>
+              </div>
+              <div class="field"><label>API key (saved only in this browser)</label>
+                <div class="flex" style="gap:6px"><input type="password" id="aiKey" value="${esc(cfg.apiKey)}" placeholder="Paste your API key"><button class="btn btn-secondary btn-sm" data-act="aiShowKey" type="button">👁</button></div>
+              </div>
+              <div class="field"><label>API base URL</label><input id="aiBaseUrl" value="${esc(cfg.baseUrl)}"></div>
+              <div class="flex" style="gap:10px;flex-wrap:wrap">
+                <button class="btn btn-primary btn-sm" data-act="aiSaveSettings">💾 Save settings</button>
+                <a class="btn btn-secondary btn-sm" target="_blank" rel="noopener" href="https://aistudio.google.com/apikey">Get a free Gemini key</a>
+              </div>
+              <p class="small muted mt">Gemini free tier works directly in the browser. Official OpenAI blocks browser calls — use OpenRouter or a local proxy with the OpenAI-compatible option.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      ${App.ai.result?`<div class="section-title">🤖 AI marking result</div><div class="ai-result">${formatAI(App.ai.result)}</div>`:''}`;
+    },
+    switchCheckerTab(arg){ App.ai.tab=arg; App.ai.settingsMsg=null; App.render('checker'); },
+    aiPickFiles(){ const f=document.getElementById('aiFiles'); if(f)f.click(); },
+    aiRemoveImage(arg){ App.ai.images.splice(Number(arg),1); App.render('checker'); },
+    aiToggleSettings(){ App.ai.showSettings=!App.ai.showSettings; App.render('checker'); },
+    aiShowKey(){ const k=document.getElementById('aiKey'); if(k) k.type = k.type==='password'?'text':'password'; },
+    aiSaveSettings(){
+      const cfg={
+        provider:document.getElementById('aiProvider').value,
+        model:(document.getElementById('aiModel').value||'').trim()||'gemini-1.5-flash',
+        apiKey:(document.getElementById('aiKey').value||'').trim(),
+        baseUrl:(document.getElementById('aiBaseUrl').value||'').trim()||'https://generativelanguage.googleapis.com/v1beta'
+      };
+      AIChecker.save(cfg);
+      App.ai.error=null;
+      App.ai.settingsMsg=cfg.apiKey?'✅ Settings saved — you can now mark answers.':'⚠️ Settings saved, but no API key yet.';
+      App.render('checker');
+    },
+    async aiCheck(){
+      const question=(document.getElementById('aiQuestion').value||'');
+      const answer=(document.getElementById('aiAnswer').value||'');
+      const expected=(document.getElementById('aiExpected').value||'');
+      const topicEl=document.getElementById('aiTopic');
+      const topic=topicEl?topicName(topicEl.value):'';
+      const marks=(document.getElementById('aiMarks').value||'');
+      if((!question.trim()) && App.ai.images.length===0 && (!answer.trim())){
+        App.ai.error='Add the question, your answer, or at least one photo to mark.'; App.render('checker'); return;
+      }
+      App.ai.loading=true; App.ai.error=null; App.ai.result=null; App.ai.settingsMsg=null; App.render('checker');
+      try{
+        const text=await AIChecker.check({question,answer,expected,topic,marks,images:App.ai.images});
+        App.ai.result=text;
+        Store.state().checkerHistory.push({verdict:'ai',text:'AI: '+(question||'photo answer').slice(0,70)}); Store.save();
+      }catch(err){
+        App.ai.error=(err&&err.msg)||'Something went wrong calling the AI.';
+      }
+      App.ai.loading=false; App.render('checker');
+    },
+    aiClearResult(){ App.ai.result=null; App.render('checker'); },
     _verdictHtml(v){
       const icon={correct:'✅',partial:'🟡',wrong:'❌'}[v.verdict];
       return `<div class="verdict ${v.verdict}">${icon} ${esc(v.msg)}</div>`;
@@ -441,6 +577,7 @@
   };
 
   window.App=App;
+  App.ai={tab:'ai', images:[], loading:false, result:null, error:null, showSettings:false, settingsMsg:null};
 
   /* ---- mobile drawer ---- */
   const sidebar=document.getElementById('sidebar');
@@ -497,6 +634,17 @@
         App.render('analytics'); ok(!!document.querySelector('#barChart canvas'),'bar chart drawn');
         // flashcards
         App.render('flashcards'); ok(App.fc.deck.length>0,'flashcard deck loaded'); App.flipCard(); ok(App.fc.flipped===true,'card flips');
+        // AI answer checker
+        App.render('checker');
+        ok(!!document.getElementById('aiFiles'),'ai checker photo input');
+        ok(!!document.getElementById('aiQuestion'),'ai checker question field');
+        App.switchCheckerTab('quick'); ok(!!document.getElementById('ncUser'),'quick checker tab');
+        App.switchCheckerTab('ai'); ok(!!document.getElementById('aiExpected'),'ai tab restored');
+        ok(typeof AIChecker.fileToImage==='function','ai image resizer');
+        ok(AIChecker.systemPrompt().indexOf('HKDSE')>=0,'ai marker prompt');
+        const _r=AIChecker.buildGeminiRequest({provider:'gemini',apiKey:'k',model:'gemini-1.5-flash',baseUrl:'https://generativelanguage.googleapis.com/v1beta'},[{text:'hi'}]);
+        ok(_r.url.indexOf('generateContent')>0,'gemini request builder');
+        ok(formatAI('**bold**').indexOf('<strong>')>0,'ai result formatter');
       }catch(err){ log.push('ERROR · '+err.message); }
       const passed=log.filter(l=>l.startsWith('PASS')).length;
       const el=document.createElement('div');
