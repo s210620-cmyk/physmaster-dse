@@ -1,6 +1,6 @@
 /* ============================================================
    PhysMaster DSE — engine (no DOM rendering here)
-   Store | PhysicsQA | AnswerChecker | QuestionGenerator
+   Store | PhysicsQA | AnswerChecker | QuestionGenerator | AIChecker
    ============================================================ */
 (function(global){
   'use strict';
@@ -138,6 +138,116 @@
     }
   };
 
+  /* ---------------- AI Answer Checker (vision LLM) ---------------- */
+  const AI_KEY='physmaster_ai_v1';
+  const AI_DEFAULTS={provider:'gemini', apiKey:'', model:'gemini-1.5-flash',
+    baseUrl:'https://generativelanguage.googleapis.com/v1beta'};
+  const AIChecker={
+    load(){ try{ const raw=(typeof localStorage!=='undefined')?localStorage.getItem(AI_KEY):null;
+      return raw?Object.assign({},AI_DEFAULTS,JSON.parse(raw)):Object.assign({},AI_DEFAULTS);
+    }catch(e){ return Object.assign({},AI_DEFAULTS);} },
+    save(cfg){ const c=Object.assign({},this.load(),cfg||{});
+      try{ if(typeof localStorage!=='undefined') localStorage.setItem(AI_KEY,JSON.stringify(c)); }catch(e){} return c; },
+    systemPrompt(){
+      return `You are a senior HKDSE Physics examiner. Mark the student's answer carefully and act as a helpful tutor.
+
+The student's answer may be typed text, a photo of handwritten working, a graph, a diagram (free-body / force, circuit, ray, field line, motion graph), or any mix. Read photos thoroughly.
+
+For ANY diagram or graph in an image, explicitly inspect and comment on:
+- Free-body / force diagrams: is every force shown? correct direction? labelled? magnitude given?
+- Motion graphs (s-t, v-t, a-t): axes labelled with quantity AND unit? correct shape? gradient interpreted correctly? area interpreted correctly?
+- Circuit diagrams: correct symbols? series/parallel correct? ammeter in series, voltmeter in parallel?
+- Ray diagrams: normal line drawn? incident/reflected/refracted rays correct? arrows present? angles sensible?
+- Field / other sketches: direction, spacing, labels.
+
+Marking rules (HKDSE style):
+- Award marks for: correct physical principle, correct formula, correct substitution WITH units, correct final answer to 2-3 significant figures.
+- Give method (M) marks even if the final number is slightly wrong.
+- Point out EACH mistake specifically and say exactly how to fix it.
+- If handwriting in a photo is illegible, say which part cannot be read.
+- Be encouraging but strict — this is exam marking.
+
+Output in this exact structure (use markdown):
+**Verdict:** estimated score /N and one-line overall comment.
+**What is correct:** bullet list.
+**Mistakes and missing marks:** bullet list, each with how to fix.
+**Diagram & graph check:** detailed comments, or "No diagram/graph provided."
+**Model answer / how to get full marks:** step-by-step.
+**Tip for next time:** one concise exam-technique tip.`;
+    },
+    buildContext({question,expected,answer,topic,marks}){
+      const L=[];
+      L.push('=== MARKING TASK ===');
+      if(topic) L.push('Topic: '+topic);
+      if(marks) L.push('Marks available: '+marks);
+      L.push('Question: '+(question&&question.trim()?question.trim():'(not provided — infer it from the student answer / photo)'));
+      if(expected&&expected.trim()) L.push('Marking scheme / expected answer: '+expected.trim());
+      L.push('Student answer (typed): '+(answer&&answer.trim()?answer.trim():'(no typed answer — see attached photo(s))'));
+      L.push('Now mark it following your instructions.');
+      return L.join('\n');
+    },
+    // read + resize an image File -> {name,mime,b64,dataUrl}
+    async fileToImage(file, maxDim, quality){
+      maxDim=maxDim||1560; quality=quality==null?0.82:quality;
+      if(!file||!file.type||!file.type.startsWith('image/')) throw {code:'BAD_FILE',msg:'Only image files are supported.'};
+      const dataUrl=await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(file); });
+      return await new Promise((res,rej)=>{
+        const img=new Image();
+        img.onload=()=>{
+          let w=img.width,h=img.height;
+          if(Math.max(w,h)>maxDim){ const s=maxDim/Math.max(w,h); w=Math.round(w*s); h=Math.round(h*s); }
+          const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+          cv.getContext('2d').drawImage(img,0,0,w,h);
+          cv.toBlob(blob=>{
+            const r=new FileReader();
+            r.onload=()=>{ const du=r.result; res({name:file.name,mime:(blob&&blob.type)||'image/jpeg',b64:du.split(',')[1],dataUrl:du}); };
+            r.onerror=()=>rej({code:'BAD_IMG',msg:'Could not read this image.'});
+            r.readAsDataURL(blob);
+          },'image/jpeg',quality);
+        };
+        img.onerror=()=>rej({code:'BAD_IMG',msg:'Could not read this image.'});
+        img.src=dataUrl;
+      });
+    },
+    buildGeminiRequest(cfg, parts){
+      return { url: cfg.baseUrl.replace(/\/+$/,'')+'/models/'+encodeURIComponent(cfg.model)+':generateContent?key='+encodeURIComponent(cfg.apiKey),
+        options:{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({contents:[{role:'user',parts}]})} };
+    },
+    buildOpenAIRequest(cfg, instruction, images){
+      const content=[{type:'text',text:instruction}];
+      images.forEach(im=>content.push({type:'image_url',image_url:{url:'data:'+im.mime+';base64,'+im.b64}}));
+      return { url: cfg.baseUrl.replace(/\/+$/,'')+'/chat/completions',
+        options:{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+cfg.apiKey},
+          body:JSON.stringify({model:cfg.model,messages:[{role:'user',content}],temperature:0.3})} };
+    },
+    async check(opts){
+      const cfg=this.load();
+      if(!cfg.apiKey||!String(cfg.apiKey).trim()) throw {code:'NO_KEY',msg:'No API key. Open ⚙️ AI settings and add a free Gemini key.'};
+      const images=opts.images||[];
+      const instruction=this.systemPrompt()+'\n\n'+this.buildContext(opts);
+      let req;
+      if(cfg.provider==='openai') req=this.buildOpenAIRequest(cfg,instruction,images);
+      else req=this.buildGeminiRequest(cfg,[{text:instruction}].concat(images.map(im=>({inline_data:{mime_type:im.mime,data:im.b64}}))));
+      let resp;
+      try{ resp=await fetch(req.url,req.options); }
+      catch(e){ throw {code:'NETWORK',msg:'Could not reach the AI service. Check internet and the API base URL.'}; }
+      if(!resp.ok){
+        let detail='';
+        try{ const j=await resp.json(); detail=(j.error&&j.error.message)||JSON.stringify(j).slice(0,200); }catch(e){}
+        if(resp.status===401||resp.status===403) throw {code:'AUTH',msg:'API key rejected (HTTP '+resp.status+'). '+detail};
+        if(resp.status===429) throw {code:'RATE',msg:'Rate limit / quota reached (HTTP 429). Wait or check your quota. '+detail};
+        throw {code:'HTTP',msg:'AI service error (HTTP '+resp.status+'). '+detail};
+      }
+      const j=await resp.json();
+      let text='';
+      if(cfg.provider==='openai'){ try{ text=j.choices[0].message.content||''; }catch(e){} }
+      else{ try{ text=j.candidates[0].content.parts.map(p=>p.text||'').join(''); }catch(e){ text=JSON.stringify(j).slice(0,500); } }
+      if(!text||!text.trim()) throw {code:'EMPTY',msg:'The AI returned an empty response. Try again with a clearer question or photo.'};
+      return text;
+    }
+  };
+
   global.Store=Store; global.PhysicsQA=PhysicsQA; global.AnswerChecker=AnswerChecker;
-  global.QuestionGenerator=QuestionGenerator; global.shuffle=shuffle;
+  global.QuestionGenerator=QuestionGenerator; global.shuffle=shuffle; global.AIChecker=AIChecker;
 })(typeof window!=='undefined'?window:globalThis);
