@@ -399,54 +399,104 @@
     fcNav(d){ const n=this.fc.deck.length; if(!n)return; this.fc.idx=(this.fc.idx+Number(d)+n)%n; this.fc.flipped=false; this.fcRender(); },
     fcKnown(){ const c=this.fc.deck[this.fc.idx]; if(c){const now=Store.toggleCard(this._cardKey(c)); this.fcRender(); if(now)setTimeout(()=>this.fcNav(1),250);} },
 
-    /* ---------- Past papers ---------- */
+    /* ---------- Past papers (embedded PDF viewer) ---------- */
     page_papers(){
+      const s=Store.state(); if(!s.papers) s.papers={};
       return `
       <div class="page-head"><h1>📝 Past Papers (2012–2026)</h1>
-        <p>Every paper from your Google Drive. Browse the folder below (organised by year), then tap a year card for its breakdown &amp; FAQ.</p></div>
-      <div class="drive-note">🔗 Papers stream from <b>your shared Google Drive folder</b>. Sign in to the Google account that owns the files if a preview asks you to. For 2012–2022 &amp; 2024 the single scan contains Paper 1 + Paper 2 + Marking Scheme in order; 2023 / 2025 / 2026 already have separate files.</div>
-      <div class="card mb">
-        <div class="flex between wrap" style="margin-bottom:10px">
-          <h3 style="margin:0">📂 All papers folder</h3>
-          <div class="flex">
-            <a class="btn btn-secondary btn-sm" target="_blank" rel="noopener" href="${DRIVE.folderOpen(PAPERS_FOLDER)}">Open folder in new tab</a>
-            <button class="btn btn-secondary btn-sm" data-act="reloadFrame" data-arg="paperFolderFrame">↻ Reload preview</button>
-          </div>
-        </div>
-        <div class="paper-viewer"><iframe id="paperFolderFrame" src="${DRIVE.folderEmbed(PAPERS_FOLDER)}" width="100%" height="430" loading="lazy"></iframe></div>
-      </div>
+        <p>Open any year and read Paper 1, Paper 2 and the Marking Scheme right here — a real page-turnable PDF viewer.</p></div>
+      <div class="drive-note">📄 <b>First-time setup (30 seconds per paper):</b> click a year → pick the P1 / P2 / MS tab → paste the Google Drive link of that PDF file → <b>Add</b>. It saves on this device and opens as a turnable PDF from then on. In Drive, open the PDF file and copy the address-bar link (it looks like <code>drive.google.com/file/d/…/view</code>). You only need to do this once per paper.</div>
       <div class="section-title">Choose a year</div>
-      <div class="year-grid">${PAST_PAPERS.map(p=>`<div class="year-btn" data-act="viewPaper" data-arg="${p.year}">${p.year}<small>${esc(p.difficulty)}</small></div>`).join('')}</div>
+      <div class="year-grid">${PAST_PAPERS.map(p=>{
+        const pp=s.papers[p.year]||{};
+        const count=['p1','p2','ms','full'].filter(k=>pp[k]).length;
+        return `<div class="year-btn" data-act="viewPaper" data-arg="${p.year}">${p.year}
+          <small>${esc(p.difficulty)}</small>
+          <span class="paper-count ${count?'':'empty'}">${count?count+' file'+(count>1?'s':''):'not added'}</span>
+        </div>`;
+      }).join('')}</div>
       <div id="paperDetail" class="mt"></div>`;
     },
-    reloadFrame(id){const f=document.getElementById(id);if(f)f.src=f.src;},
     viewPaper(year){
       const p=PAST_PAPERS.find(x=>x.year===String(year)); if(!p)return;
-      const qParts=p.faq.split('?');
+      App.paper.year=year;
+      const s=Store.state(); if(!s.papers) s.papers={};
+      const pp=s.papers[year]||{};
+      const tabs=[
+        {id:'p1',label:'Paper 1'},
+        {id:'p2',label:'Paper 2'},
+        {id:'ms',label:'Marking Scheme'},
+        {id:'full',label:'Full / Combined'}
+      ];
+      const active=App.paper.tab;
+      const activeTab=tabs.find(t=>t.id===active)||tabs[0];
+      const fileId=pp[active];
       $('#paperDetail').innerHTML=`
       <div class="card paper-detail">
         <div class="note-header">
-          <h3>📄 ${p.year} HKDSE Physics — paper guide</h3>
-          <button class="btn btn-secondary btn-sm" data-act="closePaper">✕ Close</button>
+          <h3>📄 ${p.year} HKDSE Physics</h3>
+          <div class="flex" style="gap:8px">
+            <a class="btn btn-secondary btn-sm" target="_blank" rel="noopener" href="${DRIVE.folderOpen(PAPERS_FOLDER)}">📂 Open Drive folder</a>
+            <button class="btn btn-secondary btn-sm" data-act="closePaper">✕ Close</button>
+          </div>
         </div>
         <div class="paper-meta">
           <div class="paper-meta-item"><strong>Structure:</strong> ${esc(p.structure)}</div>
           <div class="paper-meta-item"><strong>Difficulty:</strong> ${esc(p.difficulty)}</div>
           <div class="paper-meta-item"><strong>Key topics:</strong> ${esc(p.topics)}</div>
         </div>
-        <div class="paper-actions">
-          <a class="btn btn-primary btn-sm" target="_blank" rel="noopener" href="${DRIVE.folderOpen(PAPERS_FOLDER)}">📂 Open ${p.year} file in Drive folder</a>
+        <div class="paper-tabs">
+          ${tabs.map(t=>`<div class="paper-tab ${active===t.id?'active':''}" data-act="switchPaperTab" data-arg="${t.id}">${t.label}${pp[t.id]?' ✓':''}</div>`).join('')}
         </div>
+        <div class="paper-viewer" id="paperViewer">
+          ${fileId
+            ? `<div class="paper-toolbar">
+                 <span class="small muted">Reading from your Google Drive — scroll or use the viewer controls to turn pages.</span>
+                 <button class="btn btn-secondary btn-sm" data-act="removePaper" data-arg="${active}">✕ Remove</button>
+               </div>
+               <iframe src="https://drive.google.com/file/d/${esc(fileId)}/preview" width="100%" height="620" allow="autoplay" loading="lazy"></iframe>`
+            : `<div class="paper-empty">
+                 <div class="big">📄</div>
+                 <p><b>No ${esc(activeTab.label)} added yet.</b></p>
+                 <p class="muted small">Paste the Google Drive link for this ${esc(activeTab.label.toLowerCase())} file below.</p>
+                 <div class="flex mt" style="justify-content:center;gap:8px;flex-wrap:wrap">
+                   <input id="paperLinkInput" placeholder="https://drive.google.com/file/d/…/view" style="max-width:440px;flex:1;min-width:240px">
+                   <button class="btn btn-primary" data-act="addPaper" data-arg="${active}">Add</button>
+                 </div>
+                 <p class="small muted mt" style="max-width:520px;margin:12px auto 0">In Drive: open the PDF → copy the link from the address bar. The file stays in your Drive; the app only remembers its ID. If the viewer asks you to sign in, use the same Google account that owns the files.</p>
+               </div>`}
+        </div>
+        ${App.paper.error?`<div class="ai-banner err" style="margin-top:12px">${esc(App.paper.error)}</div>`:''}
         <div class="note-section"><h3>📌 Key points</h3><p>${esc(p.keyPoints)}</p></div>
         <div class="note-section"><h3>⚠️ Common pitfalls</h3><p>${esc(p.pitfalls)}</p></div>
         <div class="note-section"><h3>❓ FAQ</h3>
-          <div class="faq-item open" style="cursor:default"><div class="faq-q">${esc(qParts[0])}?</div>
-          <div class="faq-a" style="display:block">${esc(qParts.slice(1).join('?').trim()||p.faq)}</div></div>
+          <div class="faq-item open" style="cursor:default"><div class="faq-q">${esc(p.faq.split('?')[0])}?</div>
+          <div class="faq-a" style="display:block">${esc(p.faq.split('?').slice(1).join('?').trim()||p.faq)}</div></div>
         </div>
       </div>`;
       const el=$('#paperDetail'); el&&el.scrollIntoView({behavior:'smooth',block:'nearest'});
     },
-    closePaper(){ const el=$('#paperDetail'); if(el)el.innerHTML=''; },
+    switchPaperTab(tab){ App.paper.tab=tab; App.paper.error=null; App.viewPaper(App.paper.year); },
+    addPaper(type){
+      const input=document.getElementById('paperLinkInput');
+      const link=input?input.value.trim():'';
+      const id=parseDriveId(link);
+      if(!id){
+        App.paper.error='Could not find a file ID in that link. Open the PDF in Google Drive and copy the address-bar link — it should contain "/file/d/".';
+        App.viewPaper(App.paper.year); return;
+      }
+      const s=Store.state(); if(!s.papers) s.papers={};
+      if(!s.papers[App.paper.year]) s.papers[App.paper.year]={};
+      s.papers[App.paper.year][type]=id;
+      Store.save();
+      App.paper.error=null; App.paper.tab=type;
+      App.viewPaper(App.paper.year);
+    },
+    removePaper(type){
+      const s=Store.state(); if(s.papers&&s.papers[App.paper.year]) delete s.papers[App.paper.year][type];
+      Store.save(); App.paper.error=null; App.viewPaper(App.paper.year);
+    },
+    closePaper(){ App.paper.tab='p1'; App.paper.error=null; App.paper.year=null; const el=$('#paperDetail'); if(el)el.innerHTML=''; },
 
     /* ---------- Practice ---------- */
     pr:{set:[],i:0,sel:null,score:0,topic:'all',level:'all'},
@@ -578,6 +628,7 @@
 
   window.App=App;
   App.ai={tab:'ai', images:[], loading:false, result:null, error:null, showSettings:false, settingsMsg:null};
+  App.paper={tab:'p1', error:null, year:null};
 
   /* ---- mobile drawer ---- */
   const sidebar=document.getElementById('sidebar');
@@ -645,6 +696,16 @@
         const _r=AIChecker.buildGeminiRequest({provider:'gemini',apiKey:'k',model:'gemini-1.5-flash',baseUrl:'https://generativelanguage.googleapis.com/v1beta'},[{text:'hi'}]);
         ok(_r.url.indexOf('generateContent')>0,'gemini request builder');
         ok(formatAI('**bold**').indexOf('<strong>')>0,'ai result formatter');
+        // past papers embedded viewer
+        App.render('papers'); ok(!!document.querySelector('.year-grid'),'papers year grid');
+        App.viewPaper('2024'); ok(!!document.getElementById('paperLinkInput'),'paper add-link input');
+        ok(typeof parseDriveId==='function','parseDriveId exists');
+        ok(parseDriveId('https://drive.google.com/file/d/1AbC_defGhiJklmNoPqRsTuVwXyZ012/view')==='1AbC_defGhiJklmNoPqRsTuVwXyZ012','parseDriveId /file/d/');
+        ok(parseDriveId('https://drive.google.com/open?id=1AbC_defGhiJklmNoPqRsTuVwXyZ012')==='1AbC_defGhiJklmNoPqRsTuVwXyZ012','parseDriveId ?id=');
+        document.getElementById('paperLinkInput').value='https://drive.google.com/file/d/1TESTfileID1234567890abcdefghij/view';
+        App.addPaper('p1'); ok(Store.state().papers['2024']&&Store.state().papers['2024'].p1==='1TESTfileID1234567890abcdefghij','paper file id saved');
+        App.viewPaper('2024'); ok(document.querySelector('#paperViewer iframe')!==null,'paper iframe rendered after add');
+        App.switchPaperTab('ms'); ok(!!document.getElementById('paperLinkInput'),'switching to empty tab shows add input');
       }catch(err){ log.push('ERROR · '+err.message); }
       const passed=log.filter(l=>l.startsWith('PASS')).length;
       const el=document.createElement('div');
