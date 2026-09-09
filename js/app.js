@@ -404,15 +404,16 @@
       const s=Store.state(); if(!s.papers) s.papers={};
       return `
       <div class="page-head"><h1>📝 Past Papers (2012–2026)</h1>
-        <p>Open any year and read Paper 1, Paper 2 and the Marking Scheme right here — a real page-turnable PDF viewer.</p></div>
-      <div class="drive-note">📄 <b>First-time setup (30 seconds per paper):</b> click a year → pick the P1 / P2 / MS tab → paste the Google Drive link of that PDF file → <b>Add</b>. It saves on this device and opens as a turnable PDF from then on. In Drive, open the PDF file and copy the address-bar link (it looks like <code>drive.google.com/file/d/…/view</code>). You only need to do this once per paper.</div>
+        <p>All papers from your Google Drive are pre-loaded. Click any year to read Paper 1, Paper 2 and the Marking Scheme right here — a real page-turnable PDF viewer.</p></div>
+      <div class="drive-note">✅ <b>All past papers are already added</b> from your Google Drive folder. Just click a year and pick a tab. For 2012–2022 &amp; 2024 each year is one combined PDF containing P1 + P2 + MS; 2023, 2025 &amp; 2026 have separate files. You can still replace any tab by pasting a new Drive link.</div>
       <div class="section-title">Choose a year</div>
       <div class="year-grid">${PAST_PAPERS.map(p=>{
         const pp=s.papers[p.year]||{};
         const count=['p1','p2','ms','full'].filter(k=>pp[k]).length;
+        const label=pp.combined?'1 file · all sections':(count?count+' file'+(count>1?'s':''):'not added');
         return `<div class="year-btn" data-act="viewPaper" data-arg="${p.year}">${p.year}
           <small>${esc(p.difficulty)}</small>
-          <span class="paper-count ${count?'':'empty'}">${count?count+' file'+(count>1?'s':''):'not added'}</span>
+          <span class="paper-count ${count?'':'empty'}">${label}</span>
         </div>`;
       }).join('')}</div>
       <div id="paperDetail" class="mt"></div>`;
@@ -448,6 +449,7 @@
         <div class="paper-tabs">
           ${tabs.map(t=>`<div class="paper-tab ${active===t.id?'active':''}" data-act="switchPaperTab" data-arg="${t.id}">${t.label}${pp[t.id]?' ✓':''}</div>`).join('')}
         </div>
+        ${pp.combined?`<div class="small muted" style="margin:6px 0 0 4px">📎 This year is one combined PDF — all tabs open the same file; scroll to find each section.</div>`:''}
         <div class="paper-viewer" id="paperViewer">
           ${fileId
             ? `<div class="paper-toolbar">
@@ -466,6 +468,7 @@
                  <p class="small muted mt" style="max-width:520px;margin:12px auto 0">In Drive: open the PDF → copy the link from the address bar. The file stays in your Drive; the app only remembers its ID. If the viewer asks you to sign in, use the same Google account that owns the files.</p>
                </div>`}
         </div>
+        ${pp.extras&&pp.extras.length?`<div class="paper-extras"><span class="small muted" style="margin-right:8px">Also available:</span>${pp.extras.map(e=>`<a class="btn btn-secondary btn-sm" target="_blank" rel="noopener" href="https://drive.google.com/file/d/${esc(e.id)}/view">${esc(e.name)}</a>`).join('')}</div>`:''}
         ${App.paper.error?`<div class="ai-banner err" style="margin-top:12px">${esc(App.paper.error)}</div>`:''}
         <div class="note-section"><h3>📌 Key points</h3><p>${esc(p.keyPoints)}</p></div>
         <div class="note-section"><h3>⚠️ Common pitfalls</h3><p>${esc(p.pitfalls)}</p></div>
@@ -696,16 +699,19 @@
         const _r=AIChecker.buildGeminiRequest({provider:'gemini',apiKey:'k',model:'gemini-1.5-flash',baseUrl:'https://generativelanguage.googleapis.com/v1beta'},[{text:'hi'}]);
         ok(_r.url.indexOf('generateContent')>0,'gemini request builder');
         ok(formatAI('**bold**').indexOf('<strong>')>0,'ai result formatter');
-        // past papers embedded viewer
+        // past papers embedded viewer (pre-loaded from Drive)
         App.render('papers'); ok(!!document.querySelector('.year-grid'),'papers year grid');
-        App.viewPaper('2024'); ok(!!document.getElementById('paperLinkInput'),'paper add-link input');
+        App.viewPaper('2024'); ok(document.querySelector('#paperViewer iframe')!==null,'2024 pre-loaded paper renders iframe');
         ok(typeof parseDriveId==='function','parseDriveId exists');
         ok(parseDriveId('https://drive.google.com/file/d/1AbC_defGhiJklmNoPqRsTuVwXyZ012/view')==='1AbC_defGhiJklmNoPqRsTuVwXyZ012','parseDriveId /file/d/');
         ok(parseDriveId('https://drive.google.com/open?id=1AbC_defGhiJklmNoPqRsTuVwXyZ012')==='1AbC_defGhiJklmNoPqRsTuVwXyZ012','parseDriveId ?id=');
+        // 2026 MS tab is empty by default → shows add input
+        App.viewPaper('2026'); App.switchPaperTab('ms'); ok(!!document.getElementById('paperLinkInput'),'empty tab shows add input');
         document.getElementById('paperLinkInput').value='https://drive.google.com/file/d/1TESTfileID1234567890abcdefghij/view';
-        App.addPaper('p1'); ok(Store.state().papers['2024']&&Store.state().papers['2024'].p1==='1TESTfileID1234567890abcdefghij','paper file id saved');
-        App.viewPaper('2024'); ok(document.querySelector('#paperViewer iframe')!==null,'paper iframe rendered after add');
-        App.switchPaperTab('ms'); ok(!!document.getElementById('paperLinkInput'),'switching to empty tab shows add input');
+        App.addPaper('ms'); ok(Store.state().papers['2026']&&Store.state().papers['2026'].ms==='1TESTfileID1234567890abcdefghij','paper file id saved');
+        App.viewPaper('2026'); ok(document.querySelector('#paperViewer iframe')!==null,'paper iframe rendered after add');
+        // combined badge shows for 2024
+        App.viewPaper('2024'); ok(document.querySelector('.paper-detail')&&document.querySelector('.paper-detail').innerHTML.indexOf('combined PDF')>=0,'combined PDF badge shown');
       }catch(err){ log.push('ERROR · '+err.message); }
       const passed=log.filter(l=>l.startsWith('PASS')).length;
       const el=document.createElement('div');
