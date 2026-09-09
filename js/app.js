@@ -460,7 +460,7 @@
                  <input type="file" id="pdfUploadInput" accept="application/pdf,.pdf" style="display:none">
                </div>
                <div class="pdf-canvas-wrap" id="pdfCanvasWrap">
-                 <div class="pdf-loading" id="pdfLoading">⏳ Loading PDF…<br><span class="small muted">Fetching through proxy — large papers may take 5–20 seconds</span></div>
+                 <div class="pdf-loading" id="pdfLoading">⏳ Loading PDF…<br><span class="small muted">Trying 4 sources at once — max 8 seconds</span></div>
                  <canvas id="pdfCanvas" style="display:none"></canvas>
                  <div class="pdf-error" id="pdfError" style="display:none"></div>
                </div>
@@ -496,7 +496,7 @@
       const canvas=document.getElementById('pdfCanvas');
       const loading=document.getElementById('pdfLoading');
       if(!canvas)return;
-      if(loading){loading.style.display='block';loading.innerHTML='⏳ Loading PDF…<br><span class="small muted">Fetching through proxy — large papers may take 5–20 seconds</span>';}
+      if(loading){loading.style.display='block';loading.innerHTML='⏳ Loading PDF…<br><span class="small muted">Trying 4 sources at once — max 8 seconds</span>';}
       const errEl=document.getElementById('pdfError'); if(errEl)errEl.style.display='none';
       canvas.style.display='none';
       const ok=await PdfViewer.load(fileId);
