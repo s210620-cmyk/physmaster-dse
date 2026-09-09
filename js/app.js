@@ -447,23 +447,25 @@
         <div class="paper-viewer" id="paperViewer">
           ${fileId
             ? `<div class="pdf-toolbar">
-                 <button class="btn btn-secondary btn-sm" data-act="pdfPrev" id="pdfPrevBtn" disabled>← Prev page</button>
+                 <button class="btn btn-secondary btn-sm" data-act="pdfPrev" id="pdfPrevBtn" disabled>← Prev</button>
                  <span class="pdf-page-info" id="pdfPageInfo">Page — / —</span>
-                 <button class="btn btn-secondary btn-sm" data-act="pdfNext" id="pdfNextBtn" disabled>Next page →</button>
+                 <button class="btn btn-secondary btn-sm" data-act="pdfNext" id="pdfNextBtn" disabled>Next →</button>
                  <span class="pdf-sep"></span>
                  <button class="btn btn-secondary btn-sm" data-act="pdfZoomOut" id="pdfZoomOutBtn" disabled>−</button>
                  <button class="btn btn-secondary btn-sm" data-act="pdfZoomIn" id="pdfZoomInBtn" disabled>+</button>
-                 <button class="btn btn-secondary btn-sm" data-act="pdfFit" id="pdfFitBtn" disabled>Fit width</button>
+                 <button class="btn btn-secondary btn-sm" data-act="pdfFit" id="pdfFitBtn" disabled>Fit</button>
                  <span class="pdf-sep"></span>
-                 <a class="btn btn-secondary btn-sm" target="_blank" rel="noopener" href="https://drive.google.com/file/d/${esc(fileId)}/preview">↗ Full screen</a>
+                 <button class="btn btn-secondary btn-sm" data-act="pdfRetry" id="pdfRetryBtn">↻ Retry</button>
+                 <button class="btn btn-secondary btn-sm" data-act="pdfUploadClick">📂 Upload PDF</button>
+                 <input type="file" id="pdfUploadInput" accept="application/pdf,.pdf" style="display:none">
                </div>
                <div class="pdf-canvas-wrap" id="pdfCanvasWrap">
-                 <div class="pdf-loading" id="pdfLoading">⏳ Loading PDF…<br><span class="small muted">Fetching through proxy — large papers may take 5–15 seconds</span></div>
+                 <div class="pdf-loading" id="pdfLoading">⏳ Loading PDF…<br><span class="small muted">Fetching through proxy — large papers may take 5–20 seconds</span></div>
                  <canvas id="pdfCanvas" style="display:none"></canvas>
                  <div class="pdf-error" id="pdfError" style="display:none"></div>
                </div>
                <div class="paper-share-hint">
-                 <b>⚠️ If the PDF won't load:</b> In Google Drive, right-click the file → <b>Share</b> → General access → <b>Anyone with the link → Viewer</b>. Then use "↗ Full screen" above as backup.
+                 <b>📌 How to open:</b> The app tries 4 CORS proxies to fetch the PDF. If it fails, click <b>📂 Upload PDF</b> above — download the paper from Drive first, then select the file. This always works and needs no internet after upload.
                </div>`
             : `<div class="paper-empty">
                  <div class="big">📄</div>
@@ -486,14 +488,18 @@
         </div>
       </div>`;
       const el=$('#paperDetail'); el&&el.scrollIntoView({behavior:'smooth',block:'nearest'});
+      const upInp=document.getElementById('pdfUploadInput');
+      if(upInp){ upInp.onchange=e=>{ const f=e.target.files[0]; if(f)App.pdfUpload(f); e.target.value=''; }; }
       if(fileId) this._loadPdf(fileId);
     },
     async _loadPdf(fileId){
       const canvas=document.getElementById('pdfCanvas');
       const loading=document.getElementById('pdfLoading');
-      const errEl=document.getElementById('pdfError');
       if(!canvas)return;
-      const ok=await PdfViewer.load(fileId,canvas);
+      if(loading){loading.style.display='block';loading.innerHTML='⏳ Loading PDF…<br><span class="small muted">Fetching through proxy — large papers may take 5–20 seconds</span>';}
+      const errEl=document.getElementById('pdfError'); if(errEl)errEl.style.display='none';
+      canvas.style.display='none';
+      const ok=await PdfViewer.load(fileId);
       if(ok){
         try{
           const wrap=document.getElementById('pdfCanvasWrap');
@@ -515,7 +521,42 @@
       const errEl=document.getElementById('pdfError');
       if(canvas)canvas.style.display='none';
       if(loading)loading.style.display='none';
-      if(errEl){ errEl.style.display='block'; errEl.innerHTML=esc(msg)+'<br><br><span class="small muted">Try the "↗ Full screen" button above, or check that the file is shared as "Anyone with the link → Viewer" in Google Drive.</span>'; }
+      if(errEl){
+        errEl.style.display='block';
+        errEl.innerHTML='<b>❌ '+esc(msg)+'</b><br><br>'+
+          '<div class="flex" style="gap:8px;flex-wrap:wrap;justify-content:center">'+
+          '<button class="btn btn-primary btn-sm" data-act="pdfRetry">↻ Try again</button>'+
+          '<button class="btn btn-secondary btn-sm" data-act="pdfUploadClick">📂 Upload PDF from device</button>'+
+          '</div><br>'+
+          '<span class="small muted"><b>Upload instructions:</b> Open the paper in Google Drive → click the download icon (⬇) → save the PDF to your device → click "Upload PDF" above and select it. The PDF then renders directly in the app with page turning — no internet needed after upload.</span>';
+      }
+    },
+    pdfRetry(){ if(PdfViewer.fileId) this._loadPdf(PdfViewer.fileId); },
+    pdfUploadClick(){ const f=document.getElementById('pdfUploadInput'); if(f)f.click(); },
+    async pdfUpload(file){
+      if(!file)return;
+      const canvas=document.getElementById('pdfCanvas');
+      const loading=document.getElementById('pdfLoading');
+      const errEl=document.getElementById('pdfError');
+      if(loading){loading.style.display='block';loading.innerHTML='⏳ Opening uploaded PDF…';}
+      if(errEl)errEl.style.display='none';
+      if(canvas)canvas.style.display='none';
+      try{
+        const buf=await file.arrayBuffer();
+        const ok=await PdfViewer.loadFromBytes(buf);
+        if(ok){
+          const wrap=document.getElementById('pdfCanvasWrap');
+          const w=wrap?wrap.clientWidth:800;
+          await PdfViewer.fitWidth(canvas,w);
+          canvas.style.display='block';
+          if(loading)loading.style.display='none';
+          this._updatePdfControls();
+        }else{
+          this._showPdfError(PdfViewer.error||'Could not open uploaded file.');
+        }
+      }catch(e){
+        this._showPdfError('Could not read file: '+(e&&e.message||e));
+      }
     },
     _updatePdfControls(){
       const info=document.getElementById('pdfPageInfo');
@@ -750,6 +791,15 @@
         ok(!!document.getElementById('pdfNextBtn'),'PDF next page button rendered');
         ok(typeof App.pdfNext==='function','app pdfNext handler');
         ok(typeof App.pdfPrev==='function','app pdfPrev handler');
+        ok(typeof PdfViewer.loadFromBytes==='function','PdfViewer.loadFromBytes (upload fallback)');
+        ok(typeof PdfViewer._isPdf==='function','PdfViewer._isPdf validator');
+        ok(PdfViewer._isPdf(new Uint8Array([0x25,0x50,0x44,0x46,0x2d,0x31,0x2e,0x34]).buffer),'_isPdf accepts %PDF-');
+        ok(!PdfViewer._isPdf(new Uint8Array([0x3c,0x68,0x74,0x6d,0x6c]).buffer),'_isPdf rejects HTML');
+        ok(!!document.getElementById('pdfUploadInput'),'PDF upload file input rendered');
+        ok(!!document.getElementById('pdfRetryBtn'),'PDF retry button rendered');
+        ok(typeof App.pdfUpload==='function','app pdfUpload handler');
+        ok(typeof App.pdfRetry==='function','app pdfRetry handler');
+        ok(typeof App.pdfUploadClick==='function','app pdfUploadClick handler');
         ok(typeof parseDriveId==='function','parseDriveId exists');
         ok(parseDriveId('https://drive.google.com/file/d/1AbC_defGhiJklmNoPqRsTuVwXyZ012/view')==='1AbC_defGhiJklmNoPqRsTuVwXyZ012','parseDriveId /file/d/');
         ok(parseDriveId('https://drive.google.com/open?id=1AbC_defGhiJklmNoPqRsTuVwXyZ012')==='1AbC_defGhiJklmNoPqRsTuVwXyZ012','parseDriveId ?id=');
