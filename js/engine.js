@@ -1,6 +1,6 @@
 /* ============================================================
    PhysMaster DSE — engine (no DOM rendering here)
-   Store | PhysicsQA | AnswerChecker | QuestionGenerator
+   Store | PhysicsQA | AnswerChecker | QuestionGenerator | PdfViewer
    ============================================================ */
 (function(global){
   'use strict';
@@ -111,7 +111,6 @@
 
   /* ---------------- Answer checker ---------------- */
   const AnswerChecker = {
-    // numeric check
     numeric(user, accepted, tolPct){
       const u=parseFloat(String(user).replace(/[^0-9.\-eE]/g,''));
       const a=parseFloat(String(accepted).replace(/[^0-9.\-eE]/g,''));
@@ -125,7 +124,6 @@
         msg:`Off by ${diff.toPrecision(3)}. Your ${u} vs accepted ${a} (${Math.abs((u-a)/a*100).toFixed(1)}% difference). Check your formula, unit conversion and significant figures.`,
         pctErr:a?Math.abs((u-a)/a*100):0};
     },
-    // written / keyword check
     written(userText, keyPoints){
       const u=userText.toLowerCase();
       const kps=keyPoints.split(',').map(s=>s.trim()).filter(Boolean);
@@ -202,7 +200,6 @@ Output in this exact structure (use markdown):
       L.push('Now mark it following your instructions.');
       return L.join('\n');
     },
-    // read + resize an image File -> {name,mime,b64,dataUrl}
     async fileToImage(file, maxDim, quality){
       maxDim=maxDim||1560; quality=quality==null?0.82:quality;
       if(!file||!file.type||!file.type.startsWith('image/')) throw {code:'BAD_FILE',msg:'Only image files are supported.'};
@@ -264,26 +261,88 @@ Output in this exact structure (use markdown):
     }
   };
 
+  /* ---------------- PDF Viewer (PDF.js wrapper) ---------------- */
+  const PdfViewer = {
+    pdf: null,
+    pageNum: 1,
+    scale: 1.2,
+    baseScale: 1.2,
+    loading: false,
+    error: null,
+    url: null,
+    driveUrl(fileId){ return 'https://drive.google.com/uc?export=download&id='+encodeURIComponent(fileId); },
+    async load(fileId, canvas){
+      this.error=null; this.loading=true; this.pdf=null; this.pageNum=1;
+      this.url=this.driveUrl(fileId);
+      if(typeof pdfjsLib==='undefined'){
+        this.loading=false; this.error='PDF.js library failed to load. Check your internet connection and reload the page.';
+        return false;
+      }
+      try{
+        const task=pdfjsLib.getDocument({url:this.url, withCredentials:false});
+        this.pdf=await task.promise;
+        this.loading=false;
+        return true;
+      }catch(err){
+        this.loading=false;
+        const msg=err&&err.message?String(err.message):String(err);
+        if(msg.indexOf('403')>=0||msg.indexOf('404')>=0||msg.indexOf('Permission')>=0||msg.indexOf('access')>=0){
+          this.error='Could not open this PDF. The file may not be shared publicly. In Google Drive: right-click the file → Share → General access → "Anyone with the link" → Viewer. Then reload this page.';
+        }else if(msg.indexOf('Failed to fetch')>=0||msg.indexOf('NetworkError')>=0||msg.indexOf('CORS')>=0){
+          this.error='Could not download the PDF (network/CORS). Make sure you are online, and the Drive file is shared as "Anyone with the link can view".';
+        }else if(msg.indexOf('Invalid PDF')>=0||msg.indexOf('0x')>=0){
+          this.error='The file does not appear to be a valid PDF. It may be a Google Doc instead of an uploaded PDF.';
+        }else{
+          this.error='Could not open this PDF: '+msg.slice(0,200);
+        }
+        return false;
+      }
+    },
+    totalPages(){ return this.pdf?this.pdf.numPages:0; },
+    async render(canvas){
+      if(!this.pdf||!canvas)return;
+      const ctx=canvas.getContext('2d');
+      const page=await this.pdf.getPage(this.pageNum);
+      const viewport=page.getViewport({scale:this.scale});
+      canvas.width=viewport.width; canvas.height=viewport.height;
+      canvas.style.maxWidth='100%';
+      await page.render({canvasContext:ctx,viewport:viewport}).promise;
+    },
+    async goToPage(n,canvas){
+      if(!this.pdf)return;
+      n=Math.max(1,Math.min(n,this.pdf.numPages));
+      this.pageNum=n; await this.render(canvas);
+    },
+    async next(canvas){ await this.goToPage(this.pageNum+1,canvas); },
+    async prev(canvas){ await this.goToPage(this.pageNum-1,canvas); },
+    async zoomIn(canvas){ this.scale=Math.min(3,this.scale+0.2); await this.render(canvas); },
+    async zoomOut(canvas){ this.scale=Math.max(0.5,this.scale-0.2); await this.render(canvas); },
+    async fitWidth(canvas, containerWidth){
+      if(!this.pdf||!canvas)return;
+      const page=await this.pdf.getPage(this.pageNum);
+      const vp=page.getViewport({scale:1});
+      this.scale=(containerWidth-40)/vp.width;
+      this.baseScale=this.scale;
+      await this.render(canvas);
+    }
+  };
+
   /* ---------------- Google Drive file-ID parser ---------------- */
   function parseDriveId(input){
     if(!input) return null;
     const s=String(input).trim();
     if(!s) return null;
-    // /file/d/ID  (also /file/d/ID/view, /file/d/ID/edit)
     let m=s.match(/\/file\/d\/([a-zA-Z0-9_-]{10,})/);
     if(m) return m[1];
-    // ?id=ID or &id=ID  (open?id=, uc?id=, etc.)
     m=s.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);
     if(m) return m[1];
-    // /open?id=ID
     m=s.match(/\/open\?[^>]*?id=([a-zA-Z0-9_-]{10,})/);
     if(m) return m[1];
-    // raw file ID (alphanumeric + -_, at least 20 chars)
     if(/^[a-zA-Z0-9_-]{20,}$/.test(s)) return s;
     return null;
   }
 
   global.Store=Store; global.PhysicsQA=PhysicsQA; global.AnswerChecker=AnswerChecker;
   global.QuestionGenerator=QuestionGenerator; global.shuffle=shuffle; global.AIChecker=AIChecker;
-  global.parseDriveId=parseDriveId;
+  global.parseDriveId=parseDriveId; global.PdfViewer=PdfViewer;
 })(typeof window!=='undefined'?window:globalThis);
