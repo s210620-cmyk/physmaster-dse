@@ -284,25 +284,24 @@ Output in this exact structure (use markdown):
       return a[0]===0x25&&a[1]===0x50&&a[2]===0x44&&a[3]===0x46&&a[4]===0x2d;
     },
     async _fetchBytes(fileId){
-      this.triedProxies=[];
+      this.triedProxies=this.proxies.map(p=>p.name);
       const direct=this.driveUrl(fileId);
       const tfetch=(url,opts,ms)=>{
         const ctrl=new AbortController();
         const t=setTimeout(()=>ctrl.abort(),ms);
         return fetch(url,Object.assign({signal:ctrl.signal},opts)).finally(()=>clearTimeout(t));
       };
-      for(const p of this.proxies){
-        this.triedProxies.push(p.name);
-        try{
-          const resp=await tfetch(p.fn(fileId),{method:'GET',mode:'cors'},12000);
-          if(!resp.ok) continue;
-          const buf=await resp.arrayBuffer();
-          if(this._isPdf(buf)) return buf;
-        }catch(e){}
-      }
+      const tryOne=async (url)=>{
+        const resp=await tfetch(url,{method:'GET',mode:'cors'},8000);
+        if(!resp.ok) throw new Error('HTTP '+resp.status);
+        const buf=await resp.arrayBuffer();
+        if(!this._isPdf(buf)) throw new Error('not a PDF');
+        return buf;
+      };
+      const urls=this.proxies.map(p=>p.fn(fileId)).concat([direct]);
       try{
-        const resp=await tfetch(direct,{method:'GET'},8000);
-        if(resp.ok){ const buf=await resp.arrayBuffer(); if(this._isPdf(buf)) return buf; }
+        const buf=await Promise.any(urls.map(u=>tryOne(u)));
+        return buf;
       }catch(e){}
       return null;
     },
