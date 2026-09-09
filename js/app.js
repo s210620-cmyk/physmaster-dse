@@ -452,19 +452,26 @@
         ${pp.combined?`<div class="small muted" style="margin:6px 0 0 4px">📎 This year is one combined PDF — all tabs open the same file; scroll to find each section.</div>`:''}
         <div class="paper-viewer" id="paperViewer">
           ${fileId
-            ? `<div class="paper-toolbar">
-                 <span class="small muted">📖 Reading via Google Docs viewer — page-turn, zoom &amp; print inside the viewer below.</span>
-                 <div class="flex" style="gap:6px;flex-wrap:wrap">
-                   <button class="btn btn-secondary btn-sm" data-act="switchPdfViewer" data-arg="${fileId}">🔄 Switch viewer</button>
-                   <a class="btn btn-secondary btn-sm" target="_blank" rel="noopener" href="https://drive.google.com/file/d/${esc(fileId)}/view">↗ Open in Drive</a>
-                   <button class="btn btn-secondary btn-sm" data-act="removePaper" data-arg="${active}">✕ Remove</button>
+            ? `<div class="paper-open-bar">
+                 <a class="btn btn-primary btn-lg" target="_blank" rel="noopener" href="https://drive.google.com/file/d/${esc(fileId)}/preview">📖 Open PDF — turn pages full screen</a>
+                 <span class="small muted">Opens in your browser's PDF viewer — works on <b>iPad</b> (swipe to turn page) and <b>PC</b> (arrow keys / scroll). Zoom, search &amp; print built in.</span>
+               </div>
+               <div class="paper-inline-toggle">
+                 <button class="btn btn-secondary btn-sm" data-act="toggleInlineViewer" data-arg="${fileId}">🔍 Show in-app viewer (works best on PC)</button>
+               </div>
+               <div class="gview-wrap" id="inlineViewer" style="display:none">
+                 <div class="paper-toolbar">
+                   <span class="small muted">In-app viewer — if blank, use the <b>Open PDF</b> button above (iPad Safari blocks embedded Drive viewers).</span>
+                   <div class="flex" style="gap:6px;flex-wrap:wrap">
+                     <button class="btn btn-secondary btn-sm" data-act="switchPdfViewer" data-arg="${fileId}">🔄 Switch viewer</button>
+                     <a class="btn btn-secondary btn-sm" target="_blank" rel="noopener" href="https://drive.google.com/file/d/${esc(fileId)}/view">↗ Open in Drive</a>
+                     <button class="btn btn-secondary btn-sm" data-act="removePaper" data-arg="${active}">✕ Remove</button>
+                   </div>
                  </div>
+                 <iframe id="gviewFrame" src="${App.drivePreviewUrl(fileId)}" width="100%" height="600" allow="autoplay" loading="lazy"></iframe>
                </div>
-               <div class="gview-wrap">
-                 <iframe id="gviewFrame" src="${App.gviewUrl(fileId)}" width="100%" height="680" allow="autoplay" loading="lazy"></iframe>
-               </div>
-               <div class="small muted" style="padding:8px 14px;background:#f8fafc;border-top:1px solid var(--line)">
-                 💡 If the viewer shows blank: click <b>Switch viewer</b>, or make sure the file is shared as <b>Anyone with the link → Viewer</b> in Google Drive.
+               <div class="paper-share-hint">
+                 <b>⚠️ If the PDF won't open:</b> In Google Drive, right-click the file → <b>Share</b> → General access → <b>Anyone with the link → Viewer</b>. This is required for any app to display your Drive files.
                </div>`
             : `<div class="paper-empty">
                  <div class="big">📄</div>
@@ -474,7 +481,7 @@
                    <input id="paperLinkInput" placeholder="https://drive.google.com/file/d/…/view" style="max-width:440px;flex:1;min-width:240px">
                    <button class="btn btn-primary" data-act="addPaper" data-arg="${active}">Add</button>
                  </div>
-                 <p class="small muted mt" style="max-width:520px;margin:12px auto 0">In Drive: open the PDF → copy the link from the address bar. For the in-app viewer to work, the file must be shared as "Anyone with the link can view".</p>
+                 <p class="small muted mt" style="max-width:520px;margin:12px auto 0">In Drive: open the PDF → copy the link from the address bar. For the viewer to work, the file must be shared as "Anyone with the link can view".</p>
                </div>`}
         </div>
         ${pp.extras&&pp.extras.length?`<div class="paper-extras"><span class="small muted" style="margin-right:8px">Also available:</span>${pp.extras.map(e=>`<a class="btn btn-secondary btn-sm" target="_blank" rel="noopener" href="https://drive.google.com/file/d/${esc(e.id)}/view">${esc(e.name)}</a>`).join('')}</div>`:''}
@@ -496,6 +503,14 @@
     // Drive native preview URL — fallback viewer
     drivePreviewUrl(fileId){
       return 'https://drive.google.com/file/d/'+encodeURIComponent(fileId)+'/preview';
+    },
+    toggleInlineViewer(fileId){
+      const el=document.getElementById('inlineViewer');
+      if(!el)return;
+      const show=el.style.display==='none';
+      el.style.display=show?'':'none';
+      const btn=document.querySelector('[data-act="toggleInlineViewer"]');
+      if(btn)btn.textContent=show?'✕ Hide in-app viewer':'🔍 Show in-app viewer (works best on PC)';
     },
     switchPdfViewer(fileId){
       const frame=document.getElementById('gviewFrame');
@@ -720,9 +735,11 @@
         ok(typeof App.gviewUrl==='function','gviewUrl builder exists');
         ok(App.gviewUrl('abc123').indexOf('docs.google.com/gview')>0,'gviewUrl uses Google Docs viewer');
         ok(App.drivePreviewUrl('abc123').indexOf('/preview')>0,'drivePreviewUrl builder');
-        App.viewPaper('2024'); ok(!!document.querySelector('#paperViewer .gview-wrap'),'2024 pre-loaded paper shows gview iframe');
+        App.viewPaper('2024'); ok(!!document.querySelector('#paperViewer .paper-open-bar'),'2024 paper shows open-PDF bar');
+        ok(!!document.querySelector('.paper-open-bar .btn-lg'),'big open-PDF button rendered');
+        ok(!!document.getElementById('inlineViewer'),'inline viewer container exists');
         ok(!!document.getElementById('gviewFrame'),'gview iframe element rendered');
-        ok(document.getElementById('gviewFrame').src.indexOf('docs.google.com/gview')>0,'gview iframe src correct');
+        ok(document.getElementById('gviewFrame').src.indexOf('/preview')>0,'inline iframe uses Drive preview');
         ok(typeof parseDriveId==='function','parseDriveId exists');
         ok(parseDriveId('https://drive.google.com/file/d/1AbC_defGhiJklmNoPqRsTuVwXyZ012/view')==='1AbC_defGhiJklmNoPqRsTuVwXyZ012','parseDriveId /file/d/');
         ok(parseDriveId('https://drive.google.com/open?id=1AbC_defGhiJklmNoPqRsTuVwXyZ012')==='1AbC_defGhiJklmNoPqRsTuVwXyZ012','parseDriveId ?id=');
