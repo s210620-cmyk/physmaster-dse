@@ -12,7 +12,8 @@
     attempts:[],        // {id,topic,correct,ts}
     knownCards:[],      // flashcard ids marked known
     chat:[],
-    checkerHistory:[]
+    checkerHistory:[],
+    papers:{}           // year -> {p1,p2,ms,full} file IDs
   };
   const Store = {
     _state:null,
@@ -248,6 +249,26 @@ Output in this exact structure (use markdown):
     }
   };
 
+  /* ---------------- Google Drive file-ID parser ---------------- */
+  function parseDriveId(input){
+    if(!input) return null;
+    const s=String(input).trim();
+    if(!s) return null;
+    // /file/d/ID  (also /file/d/ID/view, /file/d/ID/edit)
+    let m=s.match(/\/file\/d\/([a-zA-Z0-9_-]{10,})/);
+    if(m) return m[1];
+    // ?id=ID or &id=ID  (open?id=, uc?id=, etc.)
+    m=s.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);
+    if(m) return m[1];
+    // /open?id=ID
+    m=s.match(/\/open\?[^>]*?id=([a-zA-Z0-9_-]{10,})/);
+    if(m) return m[1];
+    // raw file ID (alphanumeric + -_, at least 20 chars)
+    if(/^[a-zA-Z0-9_-]{20,}$/.test(s)) return s;
+    return null;
+  }
+
   global.Store=Store; global.PhysicsQA=PhysicsQA; global.AnswerChecker=AnswerChecker;
   global.QuestionGenerator=QuestionGenerator; global.shuffle=shuffle; global.AIChecker=AIChecker;
+  global.parseDriveId=parseDriveId;
 })(typeof window!=='undefined'?window:globalThis);
