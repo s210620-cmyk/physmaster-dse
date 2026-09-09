@@ -1,6 +1,6 @@
 /* ============================================================
    PhysMaster DSE — engine (no DOM rendering here)
-   Store | PhysicsQA | AnswerChecker | QuestionGenerator | PdfViewer
+   Store | PhysicsQA | AnswerChecker | QuestionGenerator
    ============================================================ */
 (function(global){
   'use strict';
@@ -8,12 +8,12 @@
   /* ---------------- Store (localStorage) ---------------- */
   const KEY = 'physmaster_dse_v1';
   const defaultState = {
-    topicStats:{},      // topicId -> {correct,total}
-    attempts:[],        // {id,topic,correct,ts}
-    knownCards:[],      // flashcard ids marked known
+    topicStats:{},
+    attempts:[],
+    knownCards:[],
     chat:[],
     checkerHistory:[],
-    papers:{}           // year -> {p1,p2,ms,full} file IDs
+    papers:{}
   };
   const Store = {
     _state:null,
@@ -261,37 +261,65 @@ Output in this exact structure (use markdown):
     }
   };
 
-  /* ---------------- PDF Viewer (PDF.js wrapper) ---------------- */
+  /* ---------------- PDF Viewer (PDF.js wrapper, in-app page turning) ---------------- */
   const PdfViewer = {
     pdf: null,
     pageNum: 1,
     scale: 1.2,
-    baseScale: 1.2,
     loading: false,
     error: null,
     url: null,
+    fileId: null,
     driveUrl(fileId){ return 'https://drive.google.com/uc?export=download&id='+encodeURIComponent(fileId); },
+    proxies: [
+      id => 'https://api.codetabs.com/v1/proxy/?quest='+encodeURIComponent('https://drive.google.com/uc?export=download&id='+id),
+      id => 'https://api.allorigins.win/raw?url='+encodeURIComponent('https://drive.google.com/uc?export=download&id='+id),
+      id => 'https://corsproxy.io/?url='+encodeURIComponent('https://drive.google.com/uc?export=download&id='+id)
+    ],
+    async _fetchBytes(fileId){
+      const direct=this.driveUrl(fileId);
+      for(let i=0;i<this.proxies.length;i++){
+        const url=this.proxies[i](fileId);
+        try{
+          const resp=await fetch(url,{method:'GET',mode:'cors'});
+          if(!resp.ok) continue;
+          const buf=await resp.arrayBuffer();
+          if(buf && buf.byteLength>1000) return buf;
+        }catch(e){}
+      }
+      try{
+        const resp=await fetch(direct,{method:'GET'});
+        if(resp.ok){ const buf=await resp.arrayBuffer(); if(buf.byteLength>1000) return buf; }
+      }catch(e){}
+      return null;
+    },
     async load(fileId, canvas){
-      this.error=null; this.loading=true; this.pdf=null; this.pageNum=1;
-      this.url=this.driveUrl(fileId);
+      this.error=null; this.loading=true; this.pdf=null; this.pageNum=1; this.fileId=fileId;
       if(typeof pdfjsLib==='undefined'){
-        this.loading=false; this.error='PDF.js library failed to load. Check your internet connection and reload the page.';
+        this.loading=false; this.error='PDF.js library failed to load. Check your internet connection and reload.';
         return false;
       }
       try{
-        const task=pdfjsLib.getDocument({url:this.url, withCredentials:false});
+        if(!pdfjsLib.GlobalWorkerOptions.workerSrc){
+          pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        }
+      }catch(e){}
+      const bytes=await this._fetchBytes(fileId);
+      if(!bytes){
+        this.loading=false;
+        this.error='Could not download the PDF. This usually means (1) your internet is down, or (2) the Drive file is not shared as "Anyone with the link → Viewer". Right-click the file in Drive → Share → General access → Anyone with the link → Viewer.';
+        return false;
+      }
+      try{
+        const task=pdfjsLib.getDocument({data:bytes});
         this.pdf=await task.promise;
         this.loading=false;
         return true;
       }catch(err){
         this.loading=false;
         const msg=err&&err.message?String(err.message):String(err);
-        if(msg.indexOf('403')>=0||msg.indexOf('404')>=0||msg.indexOf('Permission')>=0||msg.indexOf('access')>=0){
-          this.error='Could not open this PDF. The file may not be shared publicly. In Google Drive: right-click the file → Share → General access → "Anyone with the link" → Viewer. Then reload this page.';
-        }else if(msg.indexOf('Failed to fetch')>=0||msg.indexOf('NetworkError')>=0||msg.indexOf('CORS')>=0){
-          this.error='Could not download the PDF (network/CORS). Make sure you are online, and the Drive file is shared as "Anyone with the link can view".';
-        }else if(msg.indexOf('Invalid PDF')>=0||msg.indexOf('0x')>=0){
-          this.error='The file does not appear to be a valid PDF. It may be a Google Doc instead of an uploaded PDF.';
+        if(msg.indexOf('Invalid PDF')>=0||msg.indexOf('0x')>=0){
+          this.error='The file does not appear to be a valid PDF. It may be a Google Doc instead of an uploaded PDF file.';
         }else{
           this.error='Could not open this PDF: '+msg.slice(0,200);
         }
@@ -306,6 +334,7 @@ Output in this exact structure (use markdown):
       const viewport=page.getViewport({scale:this.scale});
       canvas.width=viewport.width; canvas.height=viewport.height;
       canvas.style.maxWidth='100%';
+      canvas.style.height='auto';
       await page.render({canvasContext:ctx,viewport:viewport}).promise;
     },
     async goToPage(n,canvas){
@@ -321,8 +350,7 @@ Output in this exact structure (use markdown):
       if(!this.pdf||!canvas)return;
       const page=await this.pdf.getPage(this.pageNum);
       const vp=page.getViewport({scale:1});
-      this.scale=(containerWidth-40)/vp.width;
-      this.baseScale=this.scale;
+      this.scale=Math.max(0.5,(containerWidth-32)/vp.width);
       await this.render(canvas);
     }
   };
