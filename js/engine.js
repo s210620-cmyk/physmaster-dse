@@ -272,42 +272,56 @@ Output in this exact structure (use markdown):
     fileId: null,
     driveUrl(fileId){ return 'https://drive.google.com/uc?export=download&id='+encodeURIComponent(fileId); },
     proxies: [
-      id => 'https://api.codetabs.com/v1/proxy/?quest='+encodeURIComponent('https://drive.google.com/uc?export=download&id='+id),
-      id => 'https://api.allorigins.win/raw?url='+encodeURIComponent('https://drive.google.com/uc?export=download&id='+id),
-      id => 'https://corsproxy.io/?url='+encodeURIComponent('https://drive.google.com/uc?export=download&id='+id)
+      {name:'codetabs', fn: id => 'https://api.codetabs.com/v1/proxy/?quest='+encodeURIComponent('https://drive.google.com/uc?export=download&id='+id)},
+      {name:'allorigins', fn: id => 'https://api.allorigins.win/raw?url='+encodeURIComponent('https://drive.google.com/uc?export=download&id='+id)},
+      {name:'corsproxy.io', fn: id => 'https://corsproxy.io/?url='+encodeURIComponent('https://drive.google.com/uc?export=download&id='+id)},
+      {name:'thingproxy', fn: id => 'https://thingproxy.freeboard.io/fetch/https://drive.google.com/uc?export=download&id='+id}
     ],
+    triedProxies: [],
+    _isPdf(bytes){
+      if(!bytes || bytes.byteLength < 5) return false;
+      const a=new Uint8Array(bytes);
+      return a[0]===0x25&&a[1]===0x50&&a[2]===0x44&&a[3]===0x46&&a[4]===0x2d;
+    },
     async _fetchBytes(fileId){
+      this.triedProxies=[];
       const direct=this.driveUrl(fileId);
-      for(let i=0;i<this.proxies.length;i++){
-        const url=this.proxies[i](fileId);
+      const tfetch=(url,opts,ms)=>{
+        const ctrl=new AbortController();
+        const t=setTimeout(()=>ctrl.abort(),ms);
+        return fetch(url,Object.assign({signal:ctrl.signal},opts)).finally(()=>clearTimeout(t));
+      };
+      for(const p of this.proxies){
+        this.triedProxies.push(p.name);
         try{
-          const resp=await fetch(url,{method:'GET',mode:'cors'});
+          const resp=await tfetch(p.fn(fileId),{method:'GET',mode:'cors'},12000);
           if(!resp.ok) continue;
           const buf=await resp.arrayBuffer();
-          if(buf && buf.byteLength>1000) return buf;
+          if(this._isPdf(buf)) return buf;
         }catch(e){}
       }
       try{
-        const resp=await fetch(direct,{method:'GET'});
-        if(resp.ok){ const buf=await resp.arrayBuffer(); if(buf.byteLength>1000) return buf; }
+        const resp=await tfetch(direct,{method:'GET'},8000);
+        if(resp.ok){ const buf=await resp.arrayBuffer(); if(this._isPdf(buf)) return buf; }
       }catch(e){}
       return null;
     },
-    async load(fileId, canvas){
-      this.error=null; this.loading=true; this.pdf=null; this.pageNum=1; this.fileId=fileId;
-      if(typeof pdfjsLib==='undefined'){
-        this.loading=false; this.error='PDF.js library failed to load. Check your internet connection and reload.';
-        return false;
-      }
+    _setWorker(){
       try{
-        if(!pdfjsLib.GlobalWorkerOptions.workerSrc){
+        if(pdfjsLib && !pdfjsLib.GlobalWorkerOptions.workerSrc){
           pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
         }
       }catch(e){}
-      const bytes=await this._fetchBytes(fileId);
-      if(!bytes){
-        this.loading=false;
-        this.error='Could not download the PDF. This usually means (1) your internet is down, or (2) the Drive file is not shared as "Anyone with the link → Viewer". Right-click the file in Drive → Share → General access → Anyone with the link → Viewer.';
+    },
+    async loadFromBytes(bytes){
+      this.error=null; this.loading=true; this.pdf=null; this.pageNum=1;
+      if(typeof pdfjsLib==='undefined'){
+        this.loading=false; this.error='PDF.js library failed to load. Check your internet connection and reload the page.';
+        return false;
+      }
+      this._setWorker();
+      if(!this._isPdf(bytes)){
+        this.loading=false; this.error='The file is not a valid PDF (missing %PDF header).';
         return false;
       }
       try{
@@ -318,13 +332,19 @@ Output in this exact structure (use markdown):
       }catch(err){
         this.loading=false;
         const msg=err&&err.message?String(err.message):String(err);
-        if(msg.indexOf('Invalid PDF')>=0||msg.indexOf('0x')>=0){
-          this.error='The file does not appear to be a valid PDF. It may be a Google Doc instead of an uploaded PDF file.';
-        }else{
-          this.error='Could not open this PDF: '+msg.slice(0,200);
-        }
+        this.error='Could not open this PDF: '+msg.slice(0,200);
         return false;
       }
+    },
+    async load(fileId){
+      this.fileId=fileId;
+      const bytes=await this._fetchBytes(fileId);
+      if(!bytes){
+        this.loading=false;
+        this.error='Could not download the PDF from Google Drive (tried '+this.triedProxies.join(', ')+'). The file may not be shared as "Anyone with the link → Viewer", or the proxies may be blocked on your network. Use "Upload PDF" below to open it directly from your device.';
+        return false;
+      }
+      return await this.loadFromBytes(bytes);
     },
     totalPages(){ return this.pdf?this.pdf.numPages:0; },
     async render(canvas){
