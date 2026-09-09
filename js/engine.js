@@ -1,6 +1,6 @@
 /* ============================================================
    PhysMaster DSE — engine (no DOM rendering here)
-   Store | PhysicsQA | AnswerChecker | QuestionGenerator | AIChecker
+   Store | PhysicsQA | AnswerChecker | QuestionGenerator
    ============================================================ */
 (function(global){
   'use strict';
@@ -17,11 +17,26 @@
   };
   const Store = {
     _state:null,
+    _mergeDefaults(s){
+      if(typeof DEFAULT_PAPERS !== 'undefined'){
+        if(!s.papers) s.papers = {};
+        for(const [year, def] of Object.entries(DEFAULT_PAPERS)){
+          if(!s.papers[year]) s.papers[year] = {};
+          for(const key of ['p1','p2','ms','full']){
+            if(!s.papers[year][key] && def[key]) s.papers[year][key] = def[key];
+          }
+          if(def.combined && s.papers[year].combined===undefined) s.papers[year].combined = true;
+          if(def.extras && !s.papers[year].extras) s.papers[year].extras = def.extras;
+        }
+      }
+      return s;
+    },
     load(){
       try{
         const raw = (typeof localStorage!=='undefined') ? localStorage.getItem(KEY) : null;
         this._state = raw ? Object.assign({}, defaultState, JSON.parse(raw)) : JSON.parse(JSON.stringify(defaultState));
       }catch(e){ this._state = JSON.parse(JSON.stringify(defaultState)); }
+      this._mergeDefaults(this._state);
       return this._state;
     },
     save(){
@@ -50,7 +65,7 @@
         .filter(x=>x.total>0)
         .sort((a,b)=>(a.pct??101)-(b.pct??101));
     },
-    reset(){ this._state=JSON.parse(JSON.stringify(defaultState)); this.save(); },
+    reset(){ this._state=JSON.parse(JSON.stringify(defaultState)); this._mergeDefaults(this._state); this.save(); },
     toggleCard(id){
       const s=this.state(), i=s.knownCards.indexOf(id);
       if(i>=0) s.knownCards.splice(i,1); else s.knownCards.push(id);
