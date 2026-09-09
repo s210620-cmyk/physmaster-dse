@@ -273,6 +273,26 @@ const PAST_PAPERS = [
  {year:'2026',structure:'Separate P1A / P1B / P2 in Drive (latest)',difficulty:'Recent style',topics:'Current syllabus emphasis',keyPoints:'Most recent paper — closest guide to current style and emphasis.',pitfalls:'Practise the latest format and command words.',faq:'Which paper should I do last in revision? The most recent (2026) as a final timed mock.'}
 ];
 
+/* ---------- Default past paper file IDs (pre-loaded from user's Google Drive) ---------- */
+/* Each year: p1/p2/ms/full = Drive file ID; combined=true means one PDF holds all sections; extras = additional files */
+const DEFAULT_PAPERS = {
+  "2012": {p1:"1RxFQmjKFDuIhqJh4iTMJeAsEDokw-Mue", p2:"1RxFQmjKFDuIhqJh4iTMJeAsEDokw-Mue", ms:"1RxFQmjKFDuIhqJh4iTMJeAsEDokw-Mue", full:"1RxFQmjKFDuIhqJh4iTMJeAsEDokw-Mue", combined:true},
+  "2013": {p1:"1yEwcA87sLfpOqrSoxoMXCKJAizyjfcls", p2:"1yEwcA87sLfpOqrSoxoMXCKJAizyjfcls", ms:"1yEwcA87sLfpOqrSoxoMXCKJAizyjfcls", full:"1yEwcA87sLfpOqrSoxoMXCKJAizyjfcls", combined:true},
+  "2014": {p1:"1puGTRl0x_nDstxpZsx6QZLZbhSVYppNV", p2:"1puGTRl0x_nDstxpZsx6QZLZbhSVYppNV", ms:"1puGTRl0x_nDstxpZsx6QZLZbhSVYppNV", full:"1puGTRl0x_nDstxpZsx6QZLZbhSVYppNV", combined:true},
+  "2015": {p1:"1AS4IajpRJmyHTab9LiJkg4Zdfl1qFPmJ", p2:"1AS4IajpRJmyHTab9LiJkg4Zdfl1qFPmJ", ms:"1AS4IajpRJmyHTab9LiJkg4Zdfl1qFPmJ", full:"1AS4IajpRJmyHTab9LiJkg4Zdfl1qFPmJ", combined:true},
+  "2016": {p1:"1FRk74Mkk4T9q8dkG-QOd18YltJgLqPqZU", p2:"1FRk74Mkk4T9q8dkG-QOd18YltJgLqPqZU", ms:"1FRk74Mkk4T9q8dkG-QOd18YltJgLqPqZU", full:"1FRk74Mkk4T9q8dkG-QOd18YltJgLqPqZU", combined:true},
+  "2017": {p1:"1Hya3izTNyTcNQacT1y99P7pd0c3A8jp2", p2:"1Hya3izTNyTcNQacT1y99P7pd0c3A8jp2", ms:"1Hya3izTNyTcNQacT1y99P7pd0c3A8jp2", full:"1Hya3izTNyTcNQacT1y99P7pd0c3A8jp2", combined:true},
+  "2018": {p1:"1xFVgb9KX5LUPuqLjlk2G2c99oeyJ0c7J", p2:"1xFVgb9KX5LUPuqLjlk2G2c99oeyJ0c7J", ms:"1xFVgb9KX5LUPuqLjlk2G2c99oeyJ0c7J", full:"1xFVgb9KX5LUPuqLjlk2G2c99oeyJ0c7J", combined:true},
+  "2019": {p1:"1_5QE2ufS5QwAJWSlXmrv5N0ArhgYS1K0", p2:"1_5QE2ufS5QwAJWSlXmrv5N0ArhgYS1K0", ms:"1_5QE2ufS5QwAJWSlXmrv5N0ArhgYS1K0", full:"1_5QE2ufS5QwAJWSlXmrv5N0ArhgYS1K0", combined:true},
+  "2020": {p1:"14CeLrdpK6_Mhl0fjfaLADWwMkVz9xxr8", p2:"14CeLrdpK6_Mhl0fjfaLADWwMkVz9xxr8", ms:"14CeLrdpK6_Mhl0fjfaLADWwMkVz9xxr8", full:"14CeLrdpK6_Mhl0fjfaLADWwMkVz9xxr8", combined:true},
+  "2021": {p1:"12BcHUFVbh5Sp1S8YgXLrjtpd1LHpAjTH", p2:"12BcHUFVbh5Sp1S8YgXLrjtpd1LHpAjTH", ms:"12BcHUFVbh5Sp1S8YgXLrjtpd1LHpAjTH", full:"12BcHUFVbh5Sp1S8YgXLrjtpd1LHpAjTH", combined:true},
+  "2022": {p1:"1hQYGYXRykkkxestx0UqywCkbsKFQCygMF", p2:"1hQYGYXRykkkxestx0UqywCkbsKFQCygMF", ms:"1hQYGYXRykkkxestx0UqywCkbsKFQCygMF", full:"1hQYGYXRykkkxestx0UqywCkbsKFQCygMF", combined:true},
+  "2023": {p1:"1w9lDkcKtjTbaatJjnrjVDyEw8H3wfJp", p2:"1iqhz2xPnuzSKb-CqkjARJDZEYr16pxo", ms:"1n74bvMeiJpUZVLamzhzYrdL_uo28eCYL", full:"1AmvzLW87h1hggUsQgVwTzfZbLTRnifm"},
+  "2024": {p1:"1v34LqGPs1WvMvh9bUyBMWrLVh-cUGPeY", p2:"1v34LqGPs1WvMvh9bUyBMWrLVh-cUGPeY", ms:"1v34LqGPs1WvMvh9bUyBMWrLVh-cUGPeY", full:"1v34LqGPs1WvMvh9bUyBMWrLVh-cUGPeY", combined:true},
+  "2025": {p1:"1D5G6bO2nr0F7e0FP6K8WlDDojS9UbJrrq", p2:"192KlS28_GoeFEtr85VZPORBtbQSkokUb", ms:"15E69RHU4kcKCL3w2QrjvKjS0idi9bEWu", full:"1HZ4p_4saGa0paf_UtIjgKxEOuScZUq1d", extras:[{name:"P2 Answer", id:"1Dn--9ek1suJpbQnBwhYaKHBMhNGfE3m_"}]},
+  "2026": {p1:"1bdN9KNtX-I5P2aNMq5LWkVmG4LqAcKUW", p2:"19-nLUyQMcoXAuETp226hU-0oj62iXttY", ms:"", full:"", extras:[{name:"P1 Section B", id:"1U0JRUyxNCufDBRxkXZ5B3qZHnvvWOxodp"}]}
+};
+
 /* ---------- Exam tips ---------- */
 const EXAM_TIPS = [
  {cat:'Time Management',icon:'⏱️',tips:[
