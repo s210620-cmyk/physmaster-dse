@@ -115,6 +115,7 @@ table.data-tbl th{background:var(--primary-soft);color:var(--primary-d);font-wei
 .paper-empty{text-align:center;padding:40px 20px;color:var(--ink)}
 .paper-empty .big{font-size:48px;margin-bottom:10px}
 .paper-toolbar{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:#f8fafc;border-bottom:1px solid var(--line);gap:10px;flex-wrap:wrap}
+.paper-extras{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:10px 12px;background:#f0f9ff;border-top:1px solid var(--line)}
 .paper-meta{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:12px 0}
 .paper-meta-item{background:#f8fafc;border-radius:9px;padding:9px 12px;font-size:13px}
 .paper-tabs{display:flex;gap:6px;flex-wrap:wrap;border-bottom:2px solid var(--line);margin-bottom:0}
