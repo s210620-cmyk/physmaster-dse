@@ -399,7 +399,7 @@
     fcNav(d){ const n=this.fc.deck.length; if(!n)return; this.fc.idx=(this.fc.idx+Number(d)+n)%n; this.fc.flipped=false; this.fcRender(); },
     fcKnown(){ const c=this.fc.deck[this.fc.idx]; if(c){const now=Store.toggleCard(this._cardKey(c)); this.fcRender(); if(now)setTimeout(()=>this.fcNav(1),250);} },
 
-    /* ---------- Past papers (PDF.js viewer) ---------- */
+    /* ---------- Past papers (embedded PDF viewer) ---------- */
     page_papers(){
       const s=Store.state(); if(!s.papers) s.papers={};
       return `
@@ -452,24 +452,19 @@
         ${pp.combined?`<div class="small muted" style="margin:6px 0 0 4px">📎 This year is one combined PDF — all tabs open the same file; scroll to find each section.</div>`:''}
         <div class="paper-viewer" id="paperViewer">
           ${fileId
-            ? `<div class="pdf-toolbar">
-                 <div class="pdf-nav">
-                   <button class="btn btn-secondary btn-sm" data-act="pdfPrev" ${PdfViewer.pageNum<=1?'disabled':''}>◀ Prev</button>
-                   <span class="pdf-page-info"><input type="number" id="pdfPageInput" value="${PdfViewer.pageNum}" min="1" style="width:50px;text-align:center"> / <span id="pdfTotalPages">${PdfViewer.totalPages()||'…'}</span></span>
-                   <button class="btn btn-secondary btn-sm" data-act="pdfNext" ${PdfViewer.pageNum>=PdfViewer.totalPages()&&PdfViewer.totalPages()?'disabled':''}>Next ▶</button>
-                 </div>
-                 <div class="pdf-zoom">
-                   <button class="btn btn-secondary btn-sm" data-act="pdfZoomOut">−</button>
-                   <button class="btn btn-secondary btn-sm" data-act="pdfFitWidth">Fit width</button>
-                   <button class="btn btn-secondary btn-sm" data-act="pdfZoomIn">+</button>
+            ? `<div class="paper-toolbar">
+                 <span class="small muted">📖 Reading via Google Docs viewer — page-turn, zoom &amp; print inside the viewer below.</span>
+                 <div class="flex" style="gap:6px;flex-wrap:wrap">
+                   <button class="btn btn-secondary btn-sm" data-act="switchPdfViewer" data-arg="${fileId}">🔄 Switch viewer</button>
                    <a class="btn btn-secondary btn-sm" target="_blank" rel="noopener" href="https://drive.google.com/file/d/${esc(fileId)}/view">↗ Open in Drive</a>
                    <button class="btn btn-secondary btn-sm" data-act="removePaper" data-arg="${active}">✕ Remove</button>
                  </div>
                </div>
-               <div class="pdf-canvas-wrap" id="pdfCanvasWrap">
-                 ${PdfViewer.loading?'<div class="pdf-loading">⏳ Loading PDF…<br><span class="small muted">Fetching from your Google Drive</span></div>':''}
-                 ${PdfViewer.error?`<div class="pdf-error"><div class="big">⚠️</div><p><b>Could not load this PDF.</b></p><p class="small">${esc(PdfViewer.error)}</p><a class="btn btn-secondary btn-sm mt" target="_blank" rel="noopener" href="https://drive.google.com/file/d/${esc(fileId)}/view">Open in Google Drive instead</a></div>`:''}
-                 <canvas id="pdfCanvas" style="${PdfViewer.loading||PdfViewer.error?'display:none':''}"></canvas>
+               <div class="gview-wrap">
+                 <iframe id="gviewFrame" src="${App.gviewUrl(fileId)}" width="100%" height="680" allow="autoplay" loading="lazy"></iframe>
+               </div>
+               <div class="small muted" style="padding:8px 14px;background:#f8fafc;border-top:1px solid var(--line)">
+                 💡 If the viewer shows blank: click <b>Switch viewer</b>, or make sure the file is shared as <b>Anyone with the link → Viewer</b> in Google Drive.
                </div>`
             : `<div class="paper-empty">
                  <div class="big">📄</div>
@@ -479,7 +474,7 @@
                    <input id="paperLinkInput" placeholder="https://drive.google.com/file/d/…/view" style="max-width:440px;flex:1;min-width:240px">
                    <button class="btn btn-primary" data-act="addPaper" data-arg="${active}">Add</button>
                  </div>
-                 <p class="small muted mt" style="max-width:520px;margin:12px auto 0">In Drive: open the PDF → copy the link from the address bar. The file stays in your Drive; the app only remembers its ID. For the in-app viewer to work, the file must be shared as "Anyone with the link can view".</p>
+                 <p class="small muted mt" style="max-width:520px;margin:12px auto 0">In Drive: open the PDF → copy the link from the address bar. For the in-app viewer to work, the file must be shared as "Anyone with the link can view".</p>
                </div>`}
         </div>
         ${pp.extras&&pp.extras.length?`<div class="paper-extras"><span class="small muted" style="margin-right:8px">Also available:</span>${pp.extras.map(e=>`<a class="btn btn-secondary btn-sm" target="_blank" rel="noopener" href="https://drive.google.com/file/d/${esc(e.id)}/view">${esc(e.name)}</a>`).join('')}</div>`:''}
@@ -492,62 +487,22 @@
         </div>
       </div>`;
       const el=$('#paperDetail'); el&&el.scrollIntoView({behavior:'smooth',block:'nearest'});
-      // Load and render PDF if a fileId is present and viewer canvas exists
-      if(fileId){
-        const canvas=document.getElementById('pdfCanvas');
-        if(canvas){
-          const expectedUrl=PdfViewer.driveUrl(fileId);
-          if(PdfViewer.url!==expectedUrl || !PdfViewer.pdf){
-            (async()=>{
-              const ok=await PdfViewer.load(fileId,canvas);
-              if(ok){
-                const wrap=document.getElementById('pdfCanvasWrap');
-                if(wrap){
-                  const loading=wrap.querySelector('.pdf-loading'); if(loading)loading.remove();
-                  const err=wrap.querySelector('.pdf-error'); if(err)err.remove();
-                  canvas.style.display='';
-                }
-                const container=document.getElementById('pdfCanvasWrap');
-                const cw=container?container.clientWidth:800;
-                await PdfViewer.fitWidth(canvas,cw);
-                App._updatePdfToolbar();
-              }else{
-                const wrap=document.getElementById('pdfCanvasWrap');
-                if(wrap){
-                  const loading=wrap.querySelector('.pdf-loading'); if(loading)loading.remove();
-                  canvas.style.display='none';
-                  let errEl=wrap.querySelector('.pdf-error');
-                  if(!errEl){
-                    errEl=document.createElement('div'); errEl.className='pdf-error';
-                    wrap.appendChild(errEl);
-                  }
-                  errEl.innerHTML='<div class="big">⚠️</div><p><b>Could not load this PDF.</b></p><p class="small">'+esc(PdfViewer.error||'Unknown error')+'</p><a class="btn btn-secondary btn-sm mt" target="_blank" rel="noopener" href="https://drive.google.com/file/d/'+esc(fileId)+'/view">Open in Google Drive instead</a>';
-                }
-              }
-            })();
-          }else{
-            PdfViewer.render(canvas);
-            App._updatePdfToolbar();
-          }
-        }
-      }
     },
-    _updatePdfToolbar(){
-      const total=PdfViewer.totalPages();
-      const totalEl=document.getElementById('pdfTotalPages'); if(totalEl)totalEl.textContent=total||'…';
-      const input=document.getElementById('pdfPageInput'); if(input)input.value=PdfViewer.pageNum;
-      document.querySelectorAll('[data-act="pdfPrev"]').forEach(b=>b.disabled=PdfViewer.pageNum<=1);
-      document.querySelectorAll('[data-act="pdfNext"]').forEach(b=>b.disabled=total?PdfViewer.pageNum>=total:false);
+    // Google Docs embedded viewer URL — renders PDF from Drive via Google's own viewer (no CORS)
+    gviewUrl(fileId){
+      const direct='https://drive.google.com/uc?export=download&id='+encodeURIComponent(fileId);
+      return 'https://docs.google.com/gview?url='+encodeURIComponent(direct)+'&embedded=true';
     },
-    async pdfPrev(){ const c=document.getElementById('pdfCanvas'); if(c){await PdfViewer.prev(c);this._updatePdfToolbar();} },
-    async pdfNext(){ const c=document.getElementById('pdfCanvas'); if(c){await PdfViewer.next(c);this._updatePdfToolbar();} },
-    async pdfZoomIn(){ const c=document.getElementById('pdfCanvas'); if(c){await PdfViewer.zoomIn(c);} },
-    async pdfZoomOut(){ const c=document.getElementById('pdfCanvas'); if(c){await PdfViewer.zoomOut(c);} },
-    async pdfFitWidth(){
-      const c=document.getElementById('pdfCanvas'); const wrap=document.getElementById('pdfCanvasWrap');
-      if(c&&wrap){await PdfViewer.fitWidth(c,wrap.clientWidth);}
+    // Drive native preview URL — fallback viewer
+    drivePreviewUrl(fileId){
+      return 'https://drive.google.com/file/d/'+encodeURIComponent(fileId)+'/preview';
     },
-    switchPaperTab(tab){ App.paper.tab=tab; App.paper.error=null; PdfViewer.pdf=null; PdfViewer.url=null; PdfViewer.error=null; PdfViewer.pageNum=1; App.viewPaper(App.paper.year); },
+    switchPdfViewer(fileId){
+      const frame=document.getElementById('gviewFrame');
+      if(!frame)return;
+      frame.src = frame.src.indexOf('docs.google.com/gview')>=0 ? this.drivePreviewUrl(fileId) : this.gviewUrl(fileId);
+    },
+    switchPaperTab(tab){ App.paper.tab=tab; App.paper.error=null; App.viewPaper(App.paper.year); },
     addPaper(type){
       const input=document.getElementById('paperLinkInput');
       const link=input?input.value.trim():'';
@@ -567,7 +522,7 @@
       const s=Store.state(); if(s.papers&&s.papers[App.paper.year]) delete s.papers[App.paper.year][type];
       Store.save(); App.paper.error=null; App.viewPaper(App.paper.year);
     },
-    closePaper(){ App.paper.tab='p1'; App.paper.error=null; App.paper.year=null; PdfViewer.pdf=null; PdfViewer.url=null; PdfViewer.error=null; PdfViewer.pageNum=1; const el=$('#paperDetail'); if(el)el.innerHTML=''; },
+    closePaper(){ App.paper.tab='p1'; App.paper.error=null; App.paper.year=null; const el=$('#paperDetail'); if(el)el.innerHTML=''; },
 
     /* ---------- Practice ---------- */
     pr:{set:[],i:0,sel:null,score:0,topic:'all',level:'all'},
@@ -722,9 +677,6 @@
   });
   document.addEventListener('keydown',e=>{
     if(e.key==='Enter' && e.target && e.target.id==='chatInput') App.sendChat();
-    if(e.key==='Enter' && e.target && e.target.id==='pdfPageInput'){
-      const n=parseInt(e.target.value); if(n&&PdfViewer.pdf){ const c=document.getElementById('pdfCanvas'); if(c)PdfViewer.goToPage(n,c).then(()=>App._updatePdfToolbar()); }
-    }
     if(e.key==='Escape') closeDrawer();
   });
   document.getElementById('resetDataBtn').addEventListener('click',()=>{
@@ -765,17 +717,19 @@
         ok(_r.url.indexOf('generateContent')>0,'gemini request builder');
         ok(formatAI('**bold**').indexOf('<strong>')>0,'ai result formatter');
         App.render('papers'); ok(!!document.querySelector('.year-grid'),'papers year grid');
-        ok(typeof PdfViewer!=='undefined','PdfViewer module loaded');
-        ok(PdfViewer.driveUrl('abc123').indexOf('export=download')>0,'PdfViewer driveUrl builder');
-        App.viewPaper('2024'); ok(!!document.querySelector('#paperViewer .pdf-toolbar'),'2024 pre-loaded paper shows PDF toolbar');
-        ok(!!document.getElementById('pdfCanvas'),'PDF canvas element rendered');
+        ok(typeof App.gviewUrl==='function','gviewUrl builder exists');
+        ok(App.gviewUrl('abc123').indexOf('docs.google.com/gview')>0,'gviewUrl uses Google Docs viewer');
+        ok(App.drivePreviewUrl('abc123').indexOf('/preview')>0,'drivePreviewUrl builder');
+        App.viewPaper('2024'); ok(!!document.querySelector('#paperViewer .gview-wrap'),'2024 pre-loaded paper shows gview iframe');
+        ok(!!document.getElementById('gviewFrame'),'gview iframe element rendered');
+        ok(document.getElementById('gviewFrame').src.indexOf('docs.google.com/gview')>0,'gview iframe src correct');
         ok(typeof parseDriveId==='function','parseDriveId exists');
         ok(parseDriveId('https://drive.google.com/file/d/1AbC_defGhiJklmNoPqRsTuVwXyZ012/view')==='1AbC_defGhiJklmNoPqRsTuVwXyZ012','parseDriveId /file/d/');
         ok(parseDriveId('https://drive.google.com/open?id=1AbC_defGhiJklmNoPqRsTuVwXyZ012')==='1AbC_defGhiJklmNoPqRsTuVwXyZ012','parseDriveId ?id=');
         App.viewPaper('2026'); App.switchPaperTab('ms'); ok(!!document.getElementById('paperLinkInput'),'empty tab shows add input');
         document.getElementById('paperLinkInput').value='https://drive.google.com/file/d/1TESTfileID1234567890abcdefghij/view';
         App.addPaper('ms'); ok(Store.state().papers['2026']&&Store.state().papers['2026'].ms==='1TESTfileID1234567890abcdefghij','paper file id saved');
-        App.viewPaper('2026'); ok(!!document.getElementById('pdfCanvas'),'PDF canvas rendered after add');
+        App.viewPaper('2026'); ok(!!document.getElementById('gviewFrame'),'gview iframe rendered after add');
         App.viewPaper('2024'); ok(document.querySelector('.paper-detail')&&document.querySelector('.paper-detail').innerHTML.indexOf('combined PDF')>=0,'combined PDF badge shown');
       }catch(err){ log.push('ERROR · '+err.message); }
       const passed=log.filter(l=>l.startsWith('PASS')).length;
